@@ -56,6 +56,7 @@
               <span class="attachment-name"><%= a.original_name %></span>
               <span class="attachment-meta">
                 <%= a.uploaded_by === 'agent' ? a.agent_name : ticket.requester_name %> &middot; <%= a.size_label %>
+                <% if (!a.visible_to_requester) { %>&middot; internal only<% } %>
               </span>
               <a class="attachment-download-btn" href="/dashboard/tickets/<%= ticket.id %>/attachments/<%= a.id %>/download">
                 <span class="icon icon-download"></span>Download
@@ -74,8 +75,12 @@
         <% } %>
         <% activity.forEach(function(a) { %>
           <li class="activity-item activity-<%= a.type %>">
-            <div class="activity-meta"><strong><%= a.agent_name %></strong> &middot; <%= a.created_at %></div>
-            <div class="activity-body <%= a.type !== 'note' ? 'muted' : '' %>"><%= a.body %></div>
+            <div class="activity-meta">
+              <strong><%= a.type === 'requester_reply' ? ticket.requester_name : (a.agent_name || 'System') %></strong>
+              &middot; <%= a.created_at %>
+              <% if (a.type === 'reply' || a.type === 'requester_reply') { %><span class="badge badge-visible-to-requester">Visible to requester</span><% } %>
+            </div>
+            <div class="activity-body <%= ['note', 'reply', 'requester_reply'].includes(a.type) ? '' : 'muted' %>"><%= a.body %></div>
           </li>
         <% }) %>
       </ul>
@@ -95,6 +100,11 @@
         <label for="body">Add a note</label>
         <textarea id="body" name="body" rows="3" maxlength="5000" placeholder="Internal note, visible to helpdesk staff only"></textarea>
 
+        <label class="checkbox-label">
+          <input type="checkbox" name="visibility" value="reply">
+          Send as a reply to the requester (visible to them, and emailed if notifications are configured)
+        </label>
+
         <label for="note-attachments">Attach a file</label>
         <input type="file" id="note-attachments" name="attachments" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.csv">
         <p class="field-hint"><%= uploadHint %></p>
@@ -105,6 +115,28 @@
   </div>
 
   <div class="ticket-side">
+    <div class="card">
+      <h2>Asset</h2>
+      <% if (asset) { %>
+        <p><a href="/dashboard/assets/<%= asset.id %>"><%= asset.name %></a></p>
+        <p class="muted"><% if (asset.asset_tag) { %><%= asset.asset_tag %> &middot; <% } %><%= asset.category %></p>
+      <% } else { %>
+        <p class="muted">No asset linked.</p>
+      <% } %>
+      <form action="/dashboard/tickets/<%= ticket.id %>/asset" method="POST" class="stacked-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <select name="asset_id">
+          <option value="">No asset</option>
+          <% assignableAssets.forEach(function(a) { %>
+            <option value="<%= a.id %>" <%= ticket.asset_id === a.id ? 'selected' : '' %>>
+              <% if (a.asset_tag) { %><%= a.asset_tag %><% } else { %>Asset #<%= a.id %><% } %>
+            </option>
+          <% }) %>
+        </select>
+        <button type="submit" class="button-secondary">Update asset</button>
+      </form>
+    </div>
+
     <div class="card">
       <h2>Priority</h2>
       <form action="/dashboard/tickets/<%= ticket.id %>/priority" method="POST" class="stacked-form">
@@ -144,6 +176,21 @@
         <button type="submit" class="button-secondary">Update assignment</button>
       </form>
     </div>
+
+    <% if (otherTickets.length) { %>
+      <div class="card">
+        <h2>From this requester</h2>
+        <p class="muted"><%= otherTickets.length %> other ticket<%= otherTickets.length === 1 ? '' : 's' %> from <%= ticket.requester_name %></p>
+        <ul class="requester-history">
+          <% otherTickets.forEach(function(t) { %>
+            <li>
+              <a href="/dashboard/tickets/<%= t.id %>">#<%= t.id %> &middot; <%= t.subject %></a>
+              <span class="badge badge-status-<%= t.status.replace(/\s+/g, '-').toLowerCase() %>"><%= t.status %></span>
+            </li>
+          <% }) %>
+        </ul>
+      </div>
+    <% } %>
   </div>
 </div>
 

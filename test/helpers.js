@@ -75,11 +75,21 @@ function makeClient(baseUrl) {
   return {
     get: (urlPath, opts) => request("GET", urlPath, opts),
     post: (urlPath, opts) => request("POST", urlPath, opts),
-    postForm: (urlPath, fields) =>
-      request("POST", urlPath, {
+    // Array values become repeated keys (ticket_ids=1&ticket_ids=2), matching
+    // how a browser actually submits multiple checkboxes sharing one name -
+    // and how Express/qs parses req.body back into an array server-side.
+    // `new URLSearchParams({ x: [1, 2] })` does NOT do this on its own (it
+    // stringifies the array into one comma-joined value instead).
+    postForm: (urlPath, fields) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(fields)) {
+        for (const v of Array.isArray(value) ? value : [value]) params.append(key, v);
+      }
+      return request("POST", urlPath, {
         headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams(fields).toString(),
-      }),
+        body: params.toString(),
+      });
+    },
     cookies: () => ({ ...cookies }),
   };
 }

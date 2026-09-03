@@ -1,0 +1,108 @@
+<%- include('../partials/header') %>
+<div class="ticket-head">
+  <div>
+    <h1><%= asset.name %></h1>
+    <p class="muted"><% if (asset.asset_tag) { %><%= asset.asset_tag %> &middot; <% } %><%= asset.category %></p>
+  </div>
+  <div class="badge-group">
+    <span class="badge badge-asset-status-<%= asset.status.replace(/\s+/g, '-').toLowerCase() %>"><%= asset.status %></span>
+  </div>
+</div>
+
+<div class="ticket-grid">
+  <div class="ticket-main">
+    <div class="card">
+      <h2>Details</h2>
+      <% if (error) { %>
+        <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
+      <% } %>
+      <form action="/dashboard/assets/<%= asset.id %>" method="POST" class="stacked-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required maxlength="200" value="<%= asset.name %>">
+
+        <div class="form-row">
+          <div>
+            <label for="asset_tag">Asset tag</label>
+            <input type="text" id="asset_tag" name="asset_tag" maxlength="200" value="<%= asset.asset_tag || '' %>">
+          </div>
+          <div>
+            <label for="category">Category</label>
+            <select id="category" name="category" required>
+              <% categories.forEach(function(c) { %>
+                <option value="<%= c %>" <%= asset.category === c ? 'selected' : '' %>><%= c %></option>
+              <% }) %>
+            </select>
+          </div>
+        </div>
+
+        <label for="status">Status</label>
+        <select id="status" name="status" required>
+          <% statuses.forEach(function(s) { %>
+            <option value="<%= s %>" <%= asset.status === s ? 'selected' : '' %>><%= s %></option>
+          <% }) %>
+        </select>
+
+        <div class="form-row">
+          <div>
+            <label for="assigned_to_name">Assigned to</label>
+            <input type="text" id="assigned_to_name" name="assigned_to_name" maxlength="200" value="<%= asset.assigned_to_name || '' %>">
+          </div>
+          <div>
+            <label for="location">Location</label>
+            <input type="text" id="location" name="location" maxlength="200" value="<%= asset.location || '' %>">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <label for="serial_number">Serial number</label>
+            <input type="text" id="serial_number" name="serial_number" maxlength="200" value="<%= asset.serial_number || '' %>">
+          </div>
+          <div>
+            <label for="vendor">Vendor</label>
+            <input type="text" id="vendor" name="vendor" maxlength="200" value="<%= asset.vendor || '' %>">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div>
+            <label for="purchase_date">Purchase date</label>
+            <input type="date" id="purchase_date" name="purchase_date" value="<%= asset.purchase_date || '' %>">
+          </div>
+          <div>
+            <label for="warranty_expires">Warranty expires</label>
+            <input type="date" id="warranty_expires" name="warranty_expires" value="<%= asset.warranty_expires || '' %>">
+          </div>
+        </div>
+
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="4" maxlength="5000"><%= asset.notes || '' %></textarea>
+
+        <button type="submit" class="button-primary">Save changes</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="ticket-side">
+    <div class="card">
+      <h2>Tickets</h2>
+      <% if (!tickets.length) { %>
+        <p class="muted">No tickets have been raised against this asset.</p>
+      <% } else { %>
+        <ul class="requester-history">
+          <% tickets.forEach(function(t) { %>
+            <li>
+              <a href="/dashboard/tickets/<%= t.id %>">#<%= t.id %> &middot; <%= t.subject %></a>
+              <span class="badge badge-status-<%= t.status.replace(/\s+/g, '-').toLowerCase() %>"><%= t.status %></span>
+            </li>
+          <% }) %>
+        </ul>
+      <% } %>
+    </div>
+  </div>
+</div>
+
+<p><a href="/dashboard/assets">&larr; Back to all assets</a></p>
+<%- include('../partials/footer') %>

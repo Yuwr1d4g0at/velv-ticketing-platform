@@ -75,4 +75,35 @@ function sendResolvedEmail({ to, ticketId, subject, oldStatus, ratingToken }) {
   );
 }
 
-module.exports = { enabled, sendTicketCreatedEmail, sendStatusChangeEmail, sendResolvedEmail };
+// An agent's note marked "visible to requester" (see the visibility field on
+// the note form) - the one way, besides a status change, that a message
+// actually reaches the requester's inbox.
+function sendReplyEmail({ to, ticketId, subject, message }) {
+  return send(
+    to,
+    `New reply on ticket #${ticketId}`,
+    `${message}\n\n---\nRe: ticket #${ticketId} ("${subject}")\n${statusPageInstructions(ticketId)}\n\n` +
+      `Our Team. Remotely Yours.\nVelv`
+  );
+}
+
+// Best-effort nudge to whoever the ticket is assigned to when the requester
+// replies - agents otherwise have no way to know without opening every
+// ticket. Silently skipped if the ticket is unassigned (nothing to notify).
+function sendAgentNotifiedOfReply({ to, ticketId, subject, message }) {
+  if (!to) return Promise.resolve({ skipped: true });
+  return send(
+    to,
+    `New reply from the requester on ticket #${ticketId}`,
+    `The requester replied on ticket #${ticketId} ("${subject}"):\n\n${message}`
+  );
+}
+
+module.exports = {
+  enabled,
+  sendTicketCreatedEmail,
+  sendStatusChangeEmail,
+  sendResolvedEmail,
+  sendReplyEmail,
+  sendAgentNotifiedOfReply,
+};

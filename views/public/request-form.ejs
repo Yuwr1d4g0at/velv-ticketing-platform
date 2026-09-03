@@ -32,6 +32,18 @@
       <% }) %>
     </select>
 
+    <% if (assets.length) { %>
+      <label for="asset_id">Related asset (optional)</label>
+      <select id="asset_id" name="asset_id">
+        <option value="">Not asset-specific</option>
+        <% assets.forEach(function(a) { %>
+          <option value="<%= a.id %>" <%= String(values.asset_id) === String(a.id) ? 'selected' : '' %>>
+            <% if (a.asset_tag) { %><%= a.asset_tag %><% } else { %>Asset #<%= a.id %><% } %>
+          </option>
+        <% }) %>
+      </select>
+    <% } %>
+
     <label for="subject">Subject</label>
     <input type="text" id="subject" name="subject" value="<%= values.subject || '' %>" required maxlength="200">
 

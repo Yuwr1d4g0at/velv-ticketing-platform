@@ -5,11 +5,12 @@ const bcrypt = require("bcryptjs");
 const db = require("../db");
 const { requireAgent } = require("../middleware/auth");
 const { verifyCsrf } = require("../middleware/csrf");
-const { CATEGORIES, PRIORITIES, STATUSES, AGING_DAYS, PAGE_SIZE } = require("../constants");
-const { sendStatusChangeEmail, sendResolvedEmail } = require("../mailer");
+const { CATEGORIES, PRIORITIES, STATUSES, ASSET_CATEGORIES, ASSET_STATUSES, AGING_DAYS_BY_PRIORITY, PAGE_SIZE } = require("../constants");
+const { sendStatusChangeEmail, sendResolvedEmail, sendReplyEmail } = require("../mailer");
 const { toCsv } = require("../csv");
 const { addTagToTicket, removeTagFromTicket, tagsForTicket, allTags } = require("../tags");
 const canned = require("../canned-responses");
+const assets = require("../assets");
 const {
   ATTACHMENTS_DIR,
   handleUpload,
@@ -33,7 +34,8 @@ function isAgingTicket(ticket) {
   if (!["Open", "In Progress"].includes(ticket.status)) return false;
   const created = new Date(`${ticket.created_at.replace(" ", "T")}Z`);
   const ageDays = (Date.now() - created.getTime()) / (1000 * 60 * 60 * 24);
-  return ageDays > AGING_DAYS;
+  const threshold = AGING_DAYS_BY_PRIORITY[ticket.priority] ?? AGING_DAYS_BY_PRIORITY.Low;
+  return ageDays > threshold;
 }
 
 function getTicketOr404(res, id) {
@@ -86,9 +88,13 @@ function buildTicketFilter(query, agentId) {
   return { where, params, filters: { status, priority, category, assigned, tag, q } };
 }
 
-// AGING_DAYS is a fixed constant (never user input), so inlining it is safe -
-// same as the fixed status/priority labels already inlined in ORDER BY below.
-const AGING_EXPR = `(tickets.status IN ('Open', 'In Progress') AND (julianday('now') - julianday(tickets.created_at)) > ${AGING_DAYS})`;
+// AGING_DAYS_BY_PRIORITY is a fixed constant (never user input), so inlining
+// its values is safe - same as the fixed status/priority labels already
+// inlined in ORDER BY below.
+const AGING_THRESHOLD_CASE = `CASE tickets.priority ${Object.entries(AGING_DAYS_BY_PRIORITY)
+  .map(([priority, days]) => `WHEN '${priority}' THEN ${days}`)
+  .join(" ")} ELSE ${AGING_DAYS_BY_PRIORITY.Low} END`;
+const AGING_EXPR = `(tickets.status IN ('Open', 'In Progress') AND (julianday('now') - julianday(tickets.created_at)) > ${AGING_THRESHOLD_CASE})`;
 
 router.get("/", (req, res) => {
   const { where, params, filters } = buildTicketFilter(req.query, req.session.agentId);
@@ -122,15 +128,38 @@ router.get("/", (req, res) => {
     .prepare(`SELECT AVG(rating) AS avg_rating, COUNT(*) AS count FROM ticket_ratings`)
     .get();
 
+  // Average time from creation to Resolved, for tickets currently sitting in
+  // Resolved or Closed - derived from ticket_activity rather than a stored
+  // column, since "when did this last become Resolved" is exactly what the
+  // most recent matching status_change row already records. A ticket
+  // resolved, reopened, and left open again drops out (no current-Resolved
+  // timestamp to measure to), which is the right call for "how long does it
+  // take us to actually finish something."
+  const resolutionTime = db
+    .prepare(
+      `SELECT AVG(julianday(resolved_at.happened) - julianday(tickets.created_at)) AS avg_days, COUNT(*) AS count
+       FROM tickets
+       JOIN (
+         SELECT ticket_id, MAX(created_at) AS happened
+         FROM ticket_activity
+         WHERE type = 'status_change' AND body LIKE '%to "Resolved".'
+         GROUP BY ticket_id
+       ) resolved_at ON resolved_at.ticket_id = tickets.id
+       WHERE tickets.status IN ('Resolved', 'Closed')`
+    )
+    .get();
+
   res.render("dashboard/home", {
     title: "Dashboard",
     tickets,
     counts,
     satisfaction,
+    resolutionTime,
     statuses: STATUSES,
     priorities: PRIORITIES,
     categories: CATEGORIES,
     allTags: allTags(),
+    agents: db.prepare("SELECT id, name FROM agents WHERE active = 1 ORDER BY name").all(),
     filters,
     page,
     totalPages,
@@ -176,19 +205,35 @@ router.get("/tickets/:id", (req, res) => {
   const ticket = getTicketOr404(res, req.params.id);
   if (!ticket) return;
 
+  // LEFT JOIN, not JOIN: a 'requester_reply' row has no agent_id at all (the
+  // requester isn't an agent), and an INNER JOIN would silently drop those
+  // rows from the feed entirely instead of just showing no agent name.
   const activity = db
     .prepare(
       `SELECT ticket_activity.*, agents.name AS agent_name
        FROM ticket_activity
-       JOIN agents ON agents.id = ticket_activity.agent_id
+       LEFT JOIN agents ON agents.id = ticket_activity.agent_id
        WHERE ticket_id = ?
        ORDER BY created_at ASC`
     )
     .all(ticket.id);
 
-  const agents = db.prepare("SELECT id, name FROM agents ORDER BY name").all();
+  // Active agents, plus whoever this ticket is currently assigned to even if
+  // they've since been deactivated - otherwise the dropdown would silently
+  // reassign the ticket the moment anyone loads this page and re-submits the
+  // form without touching the select.
+  const agents = db
+    .prepare("SELECT id, name FROM agents WHERE active = 1 OR id = ? ORDER BY name")
+    .all(ticket.assigned_to);
   const attachments = attachmentsForTicket(ticket.id).map((a) => ({ ...a, size_label: formatSize(a.size_bytes) }));
   const rating = db.prepare("SELECT rating, comment FROM ticket_ratings WHERE ticket_id = ?").get(ticket.id);
+  const otherTickets = db
+    .prepare(
+      `SELECT id, subject, status, created_at FROM tickets
+       WHERE requester_email = ? AND id != ?
+       ORDER BY created_at DESC`
+    )
+    .all(ticket.requester_email, ticket.id);
 
   res.render("dashboard/ticket", {
     title: `Ticket #${ticket.id}`,
@@ -201,11 +246,28 @@ router.get("/tickets/:id", (req, res) => {
     allTags: allTags(),
     cannedResponses: canned.all(),
     rating,
+    otherTickets,
+    asset: ticket.asset_id ? assets.get(ticket.asset_id) : null,
+    assignableAssets: assets.assignable(),
     statuses: STATUSES,
     priorities: PRIORITIES,
     uploadHint: LIMITS_HINT,
     noteError: null,
   });
+});
+
+router.post("/tickets/:id/asset", verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(res, req.params.id);
+  if (!ticket) return;
+
+  const raw = req.body.asset_id;
+  const newAssetId = raw ? parseInt(raw, 10) : null;
+  if (newAssetId && !assets.get(newAssetId)) {
+    return res.status(400).render("error", { title: "Invalid asset", message: "That asset does not exist." });
+  }
+
+  db.prepare("UPDATE tickets SET asset_id = ?, updated_at = datetime('now') WHERE id = ?").run(newAssetId, ticket.id);
+  res.redirect(`/dashboard/tickets/${ticket.id}`);
 });
 
 router.post("/tickets/:id/tags", verifyCsrf, (req, res) => {
@@ -228,49 +290,53 @@ router.post("/tickets/:id/tags/:tagId/remove", verifyCsrf, (req, res) => {
   res.redirect(`/dashboard/tickets/${ticket.id}`);
 });
 
+// Shared by the single-ticket status route and the bulk-status route below,
+// so the two can never quietly diverge on what "changing status" means
+// (activity logging, the rating-token/email side effects on Resolved, etc).
+function applyStatusChange(ticket, status, agentId) {
+  if (!STATUSES.includes(status) || status === ticket.status) return;
+
+  db.prepare("UPDATE tickets SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, ticket.id);
+  db.prepare(
+    `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'status_change', ?)`
+  ).run(ticket.id, agentId, `Status changed from "${ticket.status}" to "${status}".`);
+
+  if (status === "Resolved") {
+    // Generated lazily, once, the first time a ticket actually resolves -
+    // most tickets never need one. A bearer token, not tied to a login: see
+    // the ticket_ratings comment in src/db/index.js for why that's the
+    // right amount of friction here.
+    let ratingToken = ticket.rating_token;
+    if (!ratingToken) {
+      ratingToken = crypto.randomBytes(24).toString("hex");
+      db.prepare("UPDATE tickets SET rating_token = ? WHERE id = ?").run(ratingToken, ticket.id);
+    }
+    sendResolvedEmail({
+      to: ticket.requester_email,
+      ticketId: ticket.id,
+      subject: ticket.subject,
+      oldStatus: ticket.status,
+      ratingToken,
+    }).catch((err) => console.error("Could not send resolved email:", err.message));
+  } else {
+    sendStatusChangeEmail({
+      to: ticket.requester_email,
+      ticketId: ticket.id,
+      subject: ticket.subject,
+      oldStatus: ticket.status,
+      newStatus: status,
+    }).catch((err) => console.error("Could not send status-change email:", err.message));
+  }
+}
+
 router.post("/tickets/:id/status", verifyCsrf, (req, res) => {
   const ticket = getTicketOr404(res, req.params.id);
   if (!ticket) return;
 
-  const { status } = req.body;
-  if (!STATUSES.includes(status)) {
+  if (!STATUSES.includes(req.body.status)) {
     return res.status(400).render("error", { title: "Invalid status", message: "That status is not valid." });
   }
-
-  if (status !== ticket.status) {
-    db.prepare("UPDATE tickets SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, ticket.id);
-    db.prepare(
-      `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'status_change', ?)`
-    ).run(ticket.id, req.session.agentId, `Status changed from "${ticket.status}" to "${status}".`);
-
-    if (status === "Resolved") {
-      // Generated lazily, once, the first time a ticket actually resolves -
-      // most tickets never need one. A bearer token, not tied to a login:
-      // see the ticket_ratings comment in src/db/index.js for why that's
-      // the right amount of friction here.
-      let ratingToken = ticket.rating_token;
-      if (!ratingToken) {
-        ratingToken = crypto.randomBytes(24).toString("hex");
-        db.prepare("UPDATE tickets SET rating_token = ? WHERE id = ?").run(ratingToken, ticket.id);
-      }
-      sendResolvedEmail({
-        to: ticket.requester_email,
-        ticketId: ticket.id,
-        subject: ticket.subject,
-        oldStatus: ticket.status,
-        ratingToken,
-      }).catch((err) => console.error("Could not send resolved email:", err.message));
-    } else {
-      sendStatusChangeEmail({
-        to: ticket.requester_email,
-        ticketId: ticket.id,
-        subject: ticket.subject,
-        oldStatus: ticket.status,
-        newStatus: status,
-      }).catch((err) => console.error("Could not send status-change email:", err.message));
-    }
-  }
-
+  applyStatusChange(ticket, req.body.status, req.session.agentId);
   res.redirect(`/dashboard/tickets/${ticket.id}`);
 });
 
@@ -295,34 +361,76 @@ router.post("/tickets/:id/priority", verifyCsrf, (req, res) => {
   res.redirect(`/dashboard/tickets/${ticket.id}`);
 });
 
+// Shared by the single-ticket assign route and the bulk-assign route below.
+function applyAssignment(ticket, newAssigneeId, agentId) {
+  if (newAssigneeId === ticket.assigned_to) return true;
+  if (newAssigneeId) {
+    const exists = db.prepare("SELECT id, name FROM agents WHERE id = ? AND active = 1").get(newAssigneeId);
+    if (!exists) return false;
+  }
+
+  db.prepare("UPDATE tickets SET assigned_to = ?, updated_at = datetime('now') WHERE id = ?").run(
+    newAssigneeId,
+    ticket.id
+  );
+  const label = newAssigneeId ? db.prepare("SELECT name FROM agents WHERE id = ?").get(newAssigneeId).name : "Unassigned";
+  db.prepare(
+    `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'assignment', ?)`
+  ).run(ticket.id, agentId, `Assigned to ${label}.`);
+  return true;
+}
+
 router.post("/tickets/:id/assign", verifyCsrf, (req, res) => {
   const ticket = getTicketOr404(res, req.params.id);
   if (!ticket) return;
 
   const raw = req.body.assigned_to;
   const newAssigneeId = raw ? parseInt(raw, 10) : null;
-
-  if (newAssigneeId) {
-    const exists = db.prepare("SELECT id, name FROM agents WHERE id = ?").get(newAssigneeId);
-    if (!exists) {
-      return res.status(400).render("error", { title: "Invalid agent", message: "That agent does not exist." });
-    }
-  }
-
-  if (newAssigneeId !== ticket.assigned_to) {
-    db.prepare("UPDATE tickets SET assigned_to = ?, updated_at = datetime('now') WHERE id = ?").run(
-      newAssigneeId,
-      ticket.id
-    );
-    const label = newAssigneeId
-      ? db.prepare("SELECT name FROM agents WHERE id = ?").get(newAssigneeId).name
-      : "Unassigned";
-    db.prepare(
-      `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'assignment', ?)`
-    ).run(ticket.id, req.session.agentId, `Assigned to ${label}.`);
+  const ok = applyAssignment(ticket, newAssigneeId, req.session.agentId);
+  if (!ok) {
+    return res.status(400).render("error", { title: "Invalid agent", message: "That agent does not exist or is not active." });
   }
 
   res.redirect(`/dashboard/tickets/${ticket.id}`);
+});
+
+// Bulk actions: same underlying logic as the single-ticket routes above
+// (applyStatusChange / applyAssignment), just looped over a list of ids from
+// checkboxes on the dashboard table. redirect_to carries the current
+// filters/page back so applying a bulk action doesn't dump you back to an
+// unfiltered page 1.
+function bulkRedirect(req, res) {
+  const back = (req.body.redirect_to || "/dashboard").startsWith("/dashboard") ? req.body.redirect_to : "/dashboard";
+  res.redirect(back);
+}
+
+function parseTicketIds(body) {
+  const raw = Array.isArray(body.ticket_ids) ? body.ticket_ids : body.ticket_ids ? [body.ticket_ids] : [];
+  return raw.map((v) => parseInt(v, 10)).filter((n) => Number.isInteger(n));
+}
+
+router.post("/bulk/status", verifyCsrf, (req, res) => {
+  const ids = parseTicketIds(req.body);
+  if (ids.length && STATUSES.includes(req.body.status)) {
+    for (const id of ids) {
+      const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
+      if (ticket) applyStatusChange(ticket, req.body.status, req.session.agentId);
+    }
+  }
+  bulkRedirect(req, res);
+});
+
+router.post("/bulk/assign", verifyCsrf, (req, res) => {
+  const ids = parseTicketIds(req.body);
+  const raw = req.body.assigned_to;
+  const newAssigneeId = raw ? parseInt(raw, 10) : null;
+  if (ids.length) {
+    for (const id of ids) {
+      const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
+      if (ticket) applyAssignment(ticket, newAssigneeId, req.session.agentId);
+    }
+  }
+  bulkRedirect(req, res);
 });
 
 router.post("/tickets/:id/note", handleUpload("attachments"), verifyCsrf, (req, res) => {
@@ -344,13 +452,27 @@ router.post("/tickets/:id/note", handleUpload("attachments"), verifyCsrf, (req, 
     return res.status(400).render("error", { title: "Note too long", message: "Notes must be under 5000 characters." });
   }
 
+  const isPublicReply = req.body.visibility === "reply";
+
   if (body) {
     db.prepare(
-      `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'note', ?)`
-    ).run(ticket.id, req.session.agentId, body);
+      `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, ?, ?)`
+    ).run(ticket.id, req.session.agentId, isPublicReply ? "reply" : "note", body);
+
+    if (isPublicReply) {
+      sendReplyEmail({ to: ticket.requester_email, ticketId: ticket.id, subject: ticket.subject, message: body }).catch(
+        (err) => console.error("Could not send reply email:", err.message)
+      );
+    }
   }
   if (hasFiles) {
-    saveAttachments({ ticketId: ticket.id, files: req.files, uploadedBy: "agent", agentId: req.session.agentId });
+    saveAttachments({
+      ticketId: ticket.id,
+      files: req.files,
+      uploadedBy: "agent",
+      agentId: req.session.agentId,
+      visibleToRequester: isPublicReply,
+    });
     const names = req.files.map((f) => f.originalname).join(", ");
     db.prepare(
       `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'note', ?)`
@@ -400,12 +522,75 @@ router.post("/canned-responses/:id/delete", verifyCsrf, (req, res) => {
   res.redirect("/dashboard/canned-responses");
 });
 
+router.get("/assets", (req, res) => {
+  const { status = "", category = "", q = "" } = req.query;
+  res.render("dashboard/assets", {
+    title: "Assets",
+    items: assets.all({ status, category, q }),
+    filters: { status, category, q },
+    categories: ASSET_CATEGORIES,
+    statuses: ASSET_STATUSES,
+    values: {},
+    error: null,
+  });
+});
+
+router.post("/assets", verifyCsrf, (req, res) => {
+  const result = assets.create(req.body);
+  if (result.error) {
+    return res.status(400).render("dashboard/assets", {
+      title: "Assets",
+      items: assets.all({}),
+      filters: { status: "", category: "", q: "" },
+      categories: ASSET_CATEGORIES,
+      statuses: ASSET_STATUSES,
+      values: req.body,
+      error: result.error,
+    });
+  }
+  res.redirect(`/dashboard/assets/${result.id}`);
+});
+
+router.get("/assets/:id", (req, res) => {
+  const asset = assets.get(req.params.id);
+  if (!asset) {
+    return res.status(404).render("error", { title: "Not found", message: "That asset does not exist." });
+  }
+  res.render("dashboard/asset", {
+    title: asset.name,
+    asset,
+    tickets: assets.ticketsForAsset(asset.id),
+    categories: ASSET_CATEGORIES,
+    statuses: ASSET_STATUSES,
+    error: null,
+  });
+});
+
+router.post("/assets/:id", verifyCsrf, (req, res) => {
+  const asset = assets.get(req.params.id);
+  if (!asset) {
+    return res.status(404).render("error", { title: "Not found", message: "That asset does not exist." });
+  }
+  const result = assets.update(asset.id, req.body);
+  if (result.error) {
+    return res.status(400).render("dashboard/asset", {
+      title: asset.name,
+      asset: { ...asset, ...req.body },
+      tickets: assets.ticketsForAsset(asset.id),
+      categories: ASSET_CATEGORIES,
+      statuses: ASSET_STATUSES,
+      error: result.error,
+    });
+  }
+  res.redirect(`/dashboard/assets/${asset.id}`);
+});
+
 router.get("/agents", (req, res) => {
   const agents = db
     .prepare(
-      `SELECT agents.id, agents.name, agents.email, agents.created_at,
+      `SELECT agents.id, agents.name, agents.email, agents.active, agents.created_at,
               (SELECT COUNT(*) FROM tickets WHERE assigned_to = agents.id AND status IN ('Open', 'In Progress')) AS open_count
-       FROM agents ORDER BY agents.name`
+       FROM agents ORDER BY agents.active DESC, agents.name`
     )
     .all();
   res.render("dashboard/agents", { title: "Agents", agents, error: null });
@@ -418,9 +603,9 @@ router.post("/agents", verifyCsrf, (req, res) => {
   const rerender = (error) => {
     const agents = db
       .prepare(
-        `SELECT agents.id, agents.name, agents.email, agents.created_at,
+        `SELECT agents.id, agents.name, agents.email, agents.active, agents.created_at,
                 (SELECT COUNT(*) FROM tickets WHERE assigned_to = agents.id AND status IN ('Open', 'In Progress')) AS open_count
-         FROM agents ORDER BY agents.name`
+         FROM agents ORDER BY agents.active DESC, agents.name`
       )
       .all();
     res.status(400).render("dashboard/agents", { title: "Agents", agents, error });
@@ -447,6 +632,50 @@ router.post("/agents", verifyCsrf, (req, res) => {
     passwordHash
   );
 
+  res.redirect("/dashboard/agents");
+});
+
+function agentsForList() {
+  return db
+    .prepare(
+      `SELECT agents.id, agents.name, agents.email, agents.active, agents.created_at,
+              (SELECT COUNT(*) FROM tickets WHERE assigned_to = agents.id AND status IN ('Open', 'In Progress')) AS open_count
+       FROM agents ORDER BY agents.active DESC, agents.name`
+    )
+    .all();
+}
+
+// Deactivated, never deleted (see the comment on the agents table in
+// src/db/index.js) - this revokes login and eligibility for new assignments
+// and auto-assignment, but keeps their name on everything they've already
+// done. Guards against locking the dashboard out entirely: can't deactivate
+// yourself, and can't deactivate the last remaining active agent.
+router.post("/agents/:id/deactivate", verifyCsrf, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (id === req.session.agentId) {
+    return res.status(400).render("dashboard/agents", {
+      title: "Agents",
+      agents: agentsForList(),
+      error: "You can't deactivate your own account.",
+    });
+  }
+
+  const activeCount = db.prepare("SELECT COUNT(*) AS c FROM agents WHERE active = 1").get().c;
+  const target = db.prepare("SELECT active FROM agents WHERE id = ?").get(id);
+  if (target && target.active && activeCount <= 1) {
+    return res.status(400).render("dashboard/agents", {
+      title: "Agents",
+      agents: agentsForList(),
+      error: "Can't deactivate the last active agent - nobody would be able to log in.",
+    });
+  }
+
+  db.prepare("UPDATE agents SET active = 0 WHERE id = ?").run(id);
+  res.redirect("/dashboard/agents");
+});
+
+router.post("/agents/:id/activate", verifyCsrf, (req, res) => {
+  db.prepare("UPDATE agents SET active = 1 WHERE id = ?").run(req.params.id);
   res.redirect("/dashboard/agents");
 });
 

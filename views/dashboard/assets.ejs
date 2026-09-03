@@ -1,0 +1,128 @@
+<%- include('../partials/header') %>
+<h1>Assets</h1>
+<p class="muted">Company equipment and software. Link a ticket to one from the ticket detail page, or the requester can pick one at submission.</p>
+
+<form action="/dashboard/assets" method="GET" class="filter-bar">
+  <input type="text" name="q" placeholder="Search name, tag, owner, serial&hellip;" value="<%= filters.q %>">
+
+  <select name="status">
+    <option value="">All statuses</option>
+    <% statuses.forEach(function(s) { %>
+      <option value="<%= s %>" <%= filters.status === s ? 'selected' : '' %>><%= s %></option>
+    <% }) %>
+  </select>
+
+  <select name="category">
+    <option value="">All categories</option>
+    <% categories.forEach(function(c) { %>
+      <option value="<%= c %>" <%= filters.category === c ? 'selected' : '' %>><%= c %></option>
+    <% }) %>
+  </select>
+
+  <button type="submit" class="button-secondary">Filter</button>
+  <a href="/dashboard/assets" class="button-secondary button-ghost">Reset</a>
+</form>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Tag</th>
+        <th>Category</th>
+        <th>Status</th>
+        <th>Assigned to</th>
+        <th>Location</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!items.length) { %>
+        <tr><td colspan="6" class="empty-row">No assets match these filters.</td></tr>
+      <% } %>
+      <% items.forEach(function(a) { %>
+        <tr>
+          <td><a href="/dashboard/assets/<%= a.id %>"><%= a.name %></a></td>
+          <td><% if (a.asset_tag) { %><%= a.asset_tag %><% } else { %>&mdash;<% } %></td>
+          <td><%= a.category %></td>
+          <td><span class="badge badge-asset-status-<%= a.status.replace(/\s+/g, '-').toLowerCase() %>"><%= a.status %></span></td>
+          <td><% if (a.assigned_to_name) { %><%= a.assigned_to_name %><% } else { %>&mdash;<% } %></td>
+          <td><% if (a.location) { %><%= a.location %><% } else { %>&mdash;<% } %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<button
+  type="button"
+  class="button-secondary"
+  data-toggle="add-asset-panel"
+  data-label-show="+ Add asset"
+  data-label-hide="&minus; Add asset"
+><% if (error) { %>&minus; Add asset<% } else { %>+ Add asset<% } %></button>
+
+<div class="card card-medium" id="add-asset-panel" <%= error ? '' : 'hidden' %>>
+  <h2>Add an asset</h2>
+  <% if (error) { %>
+    <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
+  <% } %>
+  <form action="/dashboard/assets" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" required maxlength="200" value="<%= values.name || '' %>" placeholder="MacBook Pro 14&quot; - Dev Team">
+
+    <div class="form-row">
+      <div>
+        <label for="asset_tag">Asset tag</label>
+        <input type="text" id="asset_tag" name="asset_tag" maxlength="200" value="<%= values.asset_tag || '' %>" placeholder="VLV-0042">
+      </div>
+      <div>
+        <label for="category">Category</label>
+        <select id="category" name="category" required>
+          <option value="" disabled <%= !values.category ? 'selected' : '' %>>Choose one&hellip;</option>
+          <% categories.forEach(function(c) { %><option value="<%= c %>" <%= values.category === c ? 'selected' : '' %>><%= c %></option><% }) %>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="assigned_to_name">Assigned to</label>
+        <input type="text" id="assigned_to_name" name="assigned_to_name" maxlength="200" value="<%= values.assigned_to_name || '' %>" placeholder="Who has it">
+      </div>
+      <div>
+        <label for="location">Location</label>
+        <input type="text" id="location" name="location" maxlength="200" value="<%= values.location || '' %>" placeholder="Lisbon Office">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="serial_number">Serial number</label>
+        <input type="text" id="serial_number" name="serial_number" maxlength="200" value="<%= values.serial_number || '' %>">
+      </div>
+      <div>
+        <label for="vendor">Vendor</label>
+        <input type="text" id="vendor" name="vendor" maxlength="200" value="<%= values.vendor || '' %>">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="purchase_date">Purchase date</label>
+        <input type="date" id="purchase_date" name="purchase_date" value="<%= values.purchase_date || '' %>">
+      </div>
+      <div>
+        <label for="warranty_expires">Warranty expires</label>
+        <input type="date" id="warranty_expires" name="warranty_expires" value="<%= values.warranty_expires || '' %>">
+      </div>
+    </div>
+
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="3" maxlength="5000"><%= values.notes || '' %></textarea>
+
+    <button type="submit" class="button-primary">Add asset</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

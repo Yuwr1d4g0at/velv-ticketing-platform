@@ -3,14 +3,15 @@ const path = require("path");
 const rateLimit = require("express-rate-limit");
 const db = require("../db");
 const { CATEGORIES } = require("../constants");
-const { sendTicketCreatedEmail } = require("../mailer");
+const { sendTicketCreatedEmail, sendAgentNotifiedOfReply } = require("../mailer");
+const assets = require("../assets");
 const {
   ATTACHMENTS_DIR,
   handleUpload,
   saveAttachments,
   deleteUploadedFiles,
   attachmentsForTicket,
-  getAttachment,
+  getPublicAttachment,
   formatSize,
   LIMITS_HINT,
 } = require("../attachments");
@@ -42,6 +43,7 @@ router.get("/", (req, res) => {
   res.render("public/request-form", {
     title: "Submit a request",
     categories: CATEGORIES,
+    assets: assets.assignable(),
     errors: [],
     values: {},
     uploadHint: LIMITS_HINT,
@@ -55,9 +57,10 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
     category = "",
     subject = "",
     description = "",
+    asset_id = "",
   } = req.body;
 
-  const values = { requester_name, requester_email, category, subject, description };
+  const values = { requester_name, requester_email, category, subject, description, asset_id };
   const errors = [];
 
   if (!requester_name.trim()) errors.push("Your name is required.");
@@ -69,6 +72,11 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
   if (!description.trim()) errors.push("A description is required.");
   if (subject.length > 200) errors.push("Subject must be under 200 characters.");
   if (description.length > 5000) errors.push("Description must be under 5000 characters.");
+  // Asset is optional, but if one was picked it has to be real - not just
+  // any parseable integer, since this is the one field on this form a
+  // client could otherwise use to link a ticket to an arbitrary asset id.
+  const assetId = asset_id ? parseInt(asset_id, 10) : null;
+  if (assetId && !assets.get(assetId)) errors.push("Please choose a valid asset.");
   if (req.uploadError) errors.push(req.uploadError);
 
   if (errors.length) {
@@ -76,6 +84,7 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
     return res.status(400).render("public/request-form", {
       title: "Submit a request",
       categories: CATEGORIES,
+      assets: assets.assignable(),
       errors,
       values,
       uploadHint: LIMITS_HINT,
@@ -86,18 +95,43 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
   // (see the Priority card on the dashboard ticket page). Every new ticket
   // starts at the tickets.priority column's default ('Medium') until an
   // agent changes it.
+  //
+  // Auto-assigned to whichever active agent currently has the fewest open
+  // (Open/In Progress) tickets, rather than left Unassigned - a simple
+  // self-balancing rotation rather than a strict round-robin counter (no
+  // extra state to keep in sync, and it self-corrects if someone's away).
+  // Falls back to Unassigned if there are no active agents at all.
+  const nextAssignee = db
+    .prepare(
+      `SELECT agents.id FROM agents
+       LEFT JOIN tickets ON tickets.assigned_to = agents.id AND tickets.status IN ('Open', 'In Progress')
+       WHERE agents.active = 1
+       GROUP BY agents.id
+       ORDER BY COUNT(tickets.id) ASC, agents.id ASC
+       LIMIT 1`
+    )
+    .get();
+
   const result = db
     .prepare(
-      `INSERT INTO tickets (subject, description, category, requester_name, requester_email)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO tickets (subject, description, category, requester_name, requester_email, assigned_to, asset_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       subject.trim(),
       description.trim(),
       category,
       requester_name.trim(),
-      requester_email.trim().toLowerCase()
+      requester_email.trim().toLowerCase(),
+      nextAssignee ? nextAssignee.id : null,
+      assetId
     );
+
+  if (nextAssignee) {
+    db.prepare(
+      `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, NULL, 'assignment', ?)`
+    ).run(result.lastInsertRowid, "Auto-assigned on creation.");
+  }
 
   saveAttachments({ ticketId: result.lastInsertRowid, files: req.files, uploadedBy: "requester" });
 
@@ -120,12 +154,34 @@ router.get("/confirmation/:id", (req, res) => {
   // Attachment names only, no download links: unlike /status, this page has no
   // ownership check (it's a plain post-submit redirect target), so it must not
   // hand out a way to fetch file contents to anyone who can guess a ticket id.
-  const attachments = attachmentsForTicket(ticket.id);
+  const attachments = attachmentsForTicket(ticket.id, { requesterVisibleOnly: true });
   res.render("public/confirmation", { title: "Request submitted", ticket, attachments });
 });
 
+// The requester-visible half of a ticket's conversation: agent replies
+// (type 'reply') and the requester's own past replies - never internal
+// notes or system events, which is the whole reason 'reply' exists as its
+// own type separate from 'note' (see src/db/index.js).
+function conversationForTicket(ticketId) {
+  return db
+    .prepare(
+      `SELECT ticket_activity.*, agents.name AS agent_name
+       FROM ticket_activity
+       LEFT JOIN agents ON agents.id = ticket_activity.agent_id
+       WHERE ticket_id = ? AND type IN ('reply', 'requester_reply')
+       ORDER BY created_at ASC`
+    )
+    .all(ticketId);
+}
+
 router.get("/status", (req, res) => {
-  res.render("public/status-check", { title: "Check ticket status", ticket: null, attachments: [], error: null });
+  res.render("public/status-check", {
+    title: "Check ticket status",
+    ticket: null,
+    attachments: [],
+    conversation: [],
+    error: null,
+  });
 });
 
 router.post("/status", statusLimiter, (req, res) => {
@@ -137,6 +193,7 @@ router.post("/status", statusLimiter, (req, res) => {
       title: "Check ticket status",
       ticket: null,
       attachments: [],
+      conversation: [],
       error: "Enter both your ticket number and the email you used to submit it.",
     });
   }
@@ -153,6 +210,7 @@ router.post("/status", statusLimiter, (req, res) => {
       title: "Check ticket status",
       ticket: null,
       attachments: [],
+      conversation: [],
       error: "No matching ticket found. Check the ticket number and email address.",
     });
   }
@@ -160,7 +218,66 @@ router.post("/status", statusLimiter, (req, res) => {
   res.render("public/status-check", {
     title: "Check ticket status",
     ticket,
-    attachments: attachmentsForTicket(ticket.id).map((a) => ({ ...a, size_label: formatSize(a.size_bytes) })),
+    attachments: attachmentsForTicket(ticket.id, { requesterVisibleOnly: true }).map((a) => ({ ...a, size_label: formatSize(a.size_bytes) })),
+    conversation: conversationForTicket(ticket.id),
+    error: null,
+  });
+});
+
+// Same ownership check as everything else on /status (ticket id + the exact
+// requester email on file). If the ticket was Resolved or Closed, a reply
+// reopens it - the requester replying at all is a pretty strong signal it
+// isn't actually done, same as every major helpdesk tool does.
+router.post("/status/reply", statusLimiter, (req, res) => {
+  const { ticket_id = "", requester_email = "", message = "" } = req.body;
+  const id = parseInt(ticket_id, 10);
+  const email = requester_email.trim().toLowerCase();
+
+  const ticket = db.prepare("SELECT * FROM tickets WHERE id = ? AND requester_email = ?").get(id, email);
+  if (!ticket) {
+    return res.status(404).render("error", { title: "Not found", message: "That ticket does not exist." });
+  }
+
+  const body = message.trim().slice(0, 5000);
+  if (!body) {
+    return res.render("public/status-check", {
+      title: "Check ticket status",
+      ticket,
+      attachments: attachmentsForTicket(ticket.id, { requesterVisibleOnly: true }).map((a) => ({ ...a, size_label: formatSize(a.size_bytes) })),
+      conversation: conversationForTicket(ticket.id),
+      error: "Enter a message before sending.",
+    });
+  }
+
+  db.prepare(
+    `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, NULL, 'requester_reply', ?)`
+  ).run(ticket.id, body);
+
+  if (["Resolved", "Closed"].includes(ticket.status)) {
+    db.prepare("UPDATE tickets SET status = 'Open', updated_at = datetime('now') WHERE id = ?").run(ticket.id);
+    db.prepare(
+      `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, NULL, 'status_change', ?)`
+    ).run(ticket.id, `Status changed from "${ticket.status}" to "Open" (reopened by requester reply).`);
+  } else {
+    db.prepare("UPDATE tickets SET updated_at = datetime('now') WHERE id = ?").run(ticket.id);
+  }
+
+  if (ticket.assigned_to) {
+    const agent = db.prepare("SELECT email FROM agents WHERE id = ?").get(ticket.assigned_to);
+    sendAgentNotifiedOfReply({
+      to: agent && agent.email,
+      ticketId: ticket.id,
+      subject: ticket.subject,
+      message: body,
+    }).catch((err) => console.error("Could not send agent-notified-of-reply email:", err.message));
+  }
+
+  const updated = db.prepare("SELECT * FROM tickets WHERE id = ?").get(ticket.id);
+  res.render("public/status-check", {
+    title: "Check ticket status",
+    ticket: updated,
+    attachments: attachmentsForTicket(ticket.id, { requesterVisibleOnly: true }).map((a) => ({ ...a, size_label: formatSize(a.size_bytes) })),
+    conversation: conversationForTicket(ticket.id),
     error: null,
   });
 });
@@ -179,7 +296,7 @@ router.post("/status/attachments/:attachmentId/download", statusLimiter, (req, r
     return res.status(404).render("error", { title: "Not found", message: "That attachment does not exist." });
   }
 
-  const attachment = getAttachment(ticket.id, req.params.attachmentId);
+  const attachment = getPublicAttachment(ticket.id, req.params.attachmentId);
   if (!attachment) {
     return res.status(404).render("error", { title: "Not found", message: "That attachment does not exist." });
   }

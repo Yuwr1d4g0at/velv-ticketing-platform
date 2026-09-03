@@ -578,6 +578,13 @@ select {
 .badge-priority-medium { background: var(--velv-purple-100); color: var(--velv-off-black); }
 .badge-priority-high { background: #FDF0D8; color: #8A5A00; }
 .badge-priority-urgent { background: #FDE3E7; color: #B0233F; }
+.badge-asset-status-available { background: var(--velv-purple-100); color: var(--velv-off-black); }
+.badge-asset-status-reserved { background: #FDF0D8; color: #8A5A00; }
+.badge-asset-status-in-use { background: #D6F6E7; color: #067A45; }
+.badge-asset-status-in-storage { background: var(--velv-ink-100); color: var(--velv-ink-700); }
+.badge-asset-status-under-repair { background: #FDF0D8; color: #8A5A00; }
+.badge-asset-status-retired { background: var(--velv-ink-100); color: var(--velv-ink-700); }
+.badge-asset-status-lost { background: #FDE3E7; color: #B0233F; }
 .badge-aging { background: #FDF0D8; color: #8A5A00; margin-left: var(--space-2); }
 
 /* ============================================================
@@ -649,6 +656,83 @@ select {
   color: var(--velv-electric);
 }
 .star-rating input:focus-visible ~ label { outline: 3px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-sm); }
+
+/* ============================================================
+   Agents — active / deactivated
+   ============================================================ */
+.row-inactive { opacity: 0.55; }
+
+/* ============================================================
+   Reply / requester-reply activity
+   ============================================================ */
+.badge-visible-to-requester {
+  background: rgba(0, 196, 106, 0.14);
+  color: #067A45;
+  margin-left: var(--space-2);
+  font-size: 10px;
+  height: 20px;
+}
+.activity-item.activity-reply,
+.activity-item.activity-requester_reply { border-left-color: var(--status-success); }
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-body-sm);
+  color: var(--text-body);
+  margin-top: var(--space-3);
+  cursor: pointer;
+}
+.checkbox-label input { width: 16px; height: 16px; accent-color: var(--velv-electric); }
+
+/* ============================================================
+   Requester ticket history
+   ============================================================ */
+.requester-history { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.requester-history li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); font-size: var(--fs-body-sm); }
+.requester-history a { color: var(--text-strong); font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.requester-history a:hover { color: var(--velv-electric); }
+
+/* ============================================================
+   Bulk actions (dashboard ticket list)
+   ============================================================ */
+.bulk-action-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  flex-wrap: wrap;
+}
+.bulk-action-label { font-size: var(--fs-body-sm); font-weight: var(--fw-medium); color: var(--text-muted); margin-right: auto; }
+.bulk-action-bar select {
+  height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-body-sm);
+  background: var(--surface-card);
+  color: var(--text-strong);
+}
+.bulk-action-bar .button-secondary { height: 36px; padding: 0 var(--space-4); margin-top: 0; }
+.ticket-table .row-select,
+.ticket-table #select-all { width: 16px; height: 16px; accent-color: var(--velv-electric); }
+
+/* ============================================================
+   Satisfaction / resolution-time stat tiles
+   ============================================================ */
+.stat-tile-resolution { border-top-color: var(--velv-electric); }
+
+/* ============================================================
+   Public conversation thread (/status)
+   ============================================================ */
+.conversation-thread { list-style: none; margin: var(--space-3) 0 var(--space-5); padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.conversation-item { border-left: 3px solid var(--border-default); padding-left: var(--space-3); }
+.conversation-item-agent { border-left-color: var(--velv-electric); }
+.conversation-item-you { border-left-color: var(--velv-ink-400); }
 .badge-group { display: flex; gap: var(--space-2); align-items: flex-start; }
 
 /* ============================================================

@@ -9,15 +9,31 @@
         <th>Email</th>
         <th>Open tickets assigned</th>
         <th>Added</th>
+        <th>Status</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
       <% agents.forEach(function(a) { %>
-        <tr>
+        <tr class="<%= a.active ? '' : 'row-inactive' %>">
           <td><%= a.name %></td>
           <td><%= a.email %></td>
           <td><%= a.open_count %></td>
           <td><%= a.created_at %></td>
+          <td><span class="badge <%= a.active ? 'badge-status-open' : '' %>"><%= a.active ? 'Active' : 'Deactivated' %></span></td>
+          <td>
+            <% if (a.active) { %>
+              <form action="/dashboard/agents/<%= a.id %>/deactivate" method="POST" class="inline-form">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button type="submit" class="link-button">Deactivate</button>
+              </form>
+            <% } else { %>
+              <form action="/dashboard/agents/<%= a.id %>/activate" method="POST" class="inline-form">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button type="submit" class="link-button">Reactivate</button>
+              </form>
+            <% } %>
+          </td>
         </tr>
       <% }) %>
     </tbody>

@@ -46,6 +46,31 @@
         <% }) %>
       </ul>
     <% } %>
+
+    <h2>Conversation</h2>
+    <ul class="conversation-thread">
+      <% if (!conversation.length) { %>
+        <li class="muted">No replies yet.</li>
+      <% } %>
+      <% conversation.forEach(function(a) { %>
+        <li class="conversation-item <%= a.type === 'requester_reply' ? 'conversation-item-you' : 'conversation-item-agent' %>">
+          <div class="activity-meta">
+            <strong><%= a.type === 'requester_reply' ? 'You' : (a.agent_name || 'Velv Helpdesk') %></strong>
+            &middot; <%= a.created_at %>
+          </div>
+          <div class="activity-body preserve-newlines"><%= a.body %></div>
+        </li>
+      <% }) %>
+    </ul>
+
+    <form action="/status/reply" method="POST" class="stacked-form">
+      <input type="hidden" name="ticket_id" value="<%= ticket.id %>">
+      <input type="hidden" name="requester_email" value="<%= ticket.requester_email %>">
+      <label for="message">Add a reply</label>
+      <textarea id="message" name="message" rows="4" maxlength="5000" placeholder="Ask a follow-up question or add more detail&hellip;"></textarea>
+      <p class="field-hint">Replying to a Resolved or Closed ticket reopens it.</p>
+      <button type="submit" class="button-primary">Send reply</button>
+    </form>
   <% } %>
 </div>
 <%- include('../partials/footer') %>

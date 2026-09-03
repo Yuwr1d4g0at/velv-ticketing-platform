@@ -22,7 +22,7 @@ router.get("/login", (req, res) => {
 router.post("/login", loginLimiter, verifyCsrf, (req, res) => {
   const { email = "", password = "" } = req.body;
   const agent = db
-    .prepare("SELECT id, name, email, password_hash FROM agents WHERE email = ?")
+    .prepare("SELECT id, name, email, password_hash FROM agents WHERE email = ? AND active = 1")
     .get(email.trim().toLowerCase());
 
   const genericError = "Incorrect email or password.";

@@ -14,6 +14,12 @@
         <span class="stat-label">Satisfaction &middot; <%= satisfaction.count %> rating<%= satisfaction.count === 1 ? '' : 's' %></span>
       </div>
     <% } %>
+    <% if (resolutionTime.count) { %>
+      <div class="stat-tile stat-tile-resolution">
+        <span class="stat-count"><%= resolutionTime.avg_days.toFixed(1) %>d</span>
+        <span class="stat-label">Avg. time to resolve &middot; <%= resolutionTime.count %> ticket<%= resolutionTime.count === 1 ? '' : 's' %></span>
+      </div>
+    <% } %>
   </div>
 </div>
 
@@ -63,42 +69,64 @@
   </a>
 </form>
 
-<div class="table-wrap">
-  <table class="ticket-table">
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Subject</th>
-        <th>Requester</th>
-        <th>Category</th>
-        <th>Priority</th>
-        <th>Status</th>
-        <th>Assigned</th>
-        <th>Updated</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% if (!tickets.length) { %>
-        <tr><td colspan="8" class="empty-row">No tickets match these filters.</td></tr>
-      <% } %>
-      <% tickets.forEach(function(t) { %>
+<form action="/dashboard/bulk/status" method="POST" id="bulk-form">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <input type="hidden" name="redirect_to" value="/dashboard?<%= exportQuery %>&page=<%= page %>">
+
+  <div class="bulk-action-bar">
+    <span class="bulk-action-label"><span id="bulk-count">0</span> selected</span>
+    <select name="status">
+      <option value="">Set status&hellip;</option>
+      <% statuses.forEach(function(s) { %><option value="<%= s %>"><%= s %></option><% }) %>
+    </select>
+    <button type="submit" formaction="/dashboard/bulk/status" class="button-secondary">Apply</button>
+
+    <select name="assigned_to">
+      <option value="">Unassigned</option>
+      <% agents.forEach(function(a) { %><option value="<%= a.id %>"><%= a.name %></option><% }) %>
+    </select>
+    <button type="submit" formaction="/dashboard/bulk/assign" class="button-secondary">Apply</button>
+  </div>
+
+  <div class="table-wrap">
+    <table class="ticket-table">
+      <thead>
         <tr>
-          <td><a href="/dashboard/tickets/<%= t.id %>">#<%= t.id %></a></td>
-          <td>
-            <a href="/dashboard/tickets/<%= t.id %>"><%= t.subject %></a>
-            <% if (t.is_aging) { %><span class="badge badge-aging">Aging</span><% } %>
-          </td>
-          <td><%= t.requester_name %></td>
-          <td><%= t.category %></td>
-          <td><span class="badge badge-priority-<%= t.priority.toLowerCase() %>"><%= t.priority %></span></td>
-          <td><span class="badge badge-status-<%= t.status.replace(/\s+/g, '-').toLowerCase() %>"><%= t.status %></span></td>
-          <td><%= t.assigned_name || 'Unassigned' %></td>
-          <td><%= t.updated_at %></td>
+          <th><input type="checkbox" id="select-all" aria-label="Select all tickets"></th>
+          <th>#</th>
+          <th>Subject</th>
+          <th>Requester</th>
+          <th>Category</th>
+          <th>Priority</th>
+          <th>Status</th>
+          <th>Assigned</th>
+          <th>Updated</th>
         </tr>
-      <% }) %>
-    </tbody>
-  </table>
-</div>
+      </thead>
+      <tbody>
+        <% if (!tickets.length) { %>
+          <tr><td colspan="9" class="empty-row">No tickets match these filters.</td></tr>
+        <% } %>
+        <% tickets.forEach(function(t) { %>
+          <tr>
+            <td><input type="checkbox" name="ticket_ids" value="<%= t.id %>" class="row-select" aria-label="Select ticket #<%= t.id %>"></td>
+            <td><a href="/dashboard/tickets/<%= t.id %>">#<%= t.id %></a></td>
+            <td>
+              <a href="/dashboard/tickets/<%= t.id %>"><%= t.subject %></a>
+              <% if (t.is_aging) { %><span class="badge badge-aging">Aging</span><% } %>
+            </td>
+            <td><%= t.requester_name %></td>
+            <td><%= t.category %></td>
+            <td><span class="badge badge-priority-<%= t.priority.toLowerCase() %>"><%= t.priority %></span></td>
+            <td><span class="badge badge-status-<%= t.status.replace(/\s+/g, '-').toLowerCase() %>"><%= t.status %></span></td>
+            <td><%= t.assigned_name || 'Unassigned' %></td>
+            <td><%= t.updated_at %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</form>
 
 <% if (totalPages > 1) { %>
   <nav class="pagination">

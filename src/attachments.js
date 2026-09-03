@@ -86,11 +86,16 @@ function handleUpload(fieldName) {
   };
 }
 
-function saveAttachments({ ticketId, files, uploadedBy, agentId = null }) {
+// visibleToRequester: a requester's own upload is always visible to them
+// (default true); an agent's upload defaults to internal-only unless it's
+// attached to a note explicitly marked "visible to requester" - otherwise an
+// agent could attach something meant to stay internal to an otherwise-
+// internal note and have it leak via /status anyway.
+function saveAttachments({ ticketId, files, uploadedBy, agentId = null, visibleToRequester = true }) {
   if (!files || !files.length) return [];
   const insert = db.prepare(
-    `INSERT INTO attachments (ticket_id, stored_name, original_name, mime_type, size_bytes, uploaded_by, agent_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO attachments (ticket_id, stored_name, original_name, mime_type, size_bytes, uploaded_by, agent_id, visible_to_requester)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   );
   return files.map((file) => {
     const result = insert.run(
@@ -100,7 +105,8 @@ function saveAttachments({ ticketId, files, uploadedBy, agentId = null }) {
       file.mimetype,
       file.size,
       uploadedBy,
-      agentId
+      agentId,
+      visibleToRequester ? 1 : 0
     );
     return result.lastInsertRowid;
   });
@@ -112,21 +118,36 @@ function deleteUploadedFiles(files) {
   }
 }
 
-function attachmentsForTicket(ticketId) {
+// requesterVisibleOnly: true for anything rendered on a public (/status)
+// page - false (the default) for the dashboard, where agents see everything
+// regardless of the visibility flag.
+function attachmentsForTicket(ticketId, { requesterVisibleOnly = false } = {}) {
   return db
     .prepare(
       `SELECT attachments.*, agents.name AS agent_name
        FROM attachments
        LEFT JOIN agents ON agents.id = attachments.agent_id
-       WHERE ticket_id = ?
+       WHERE ticket_id = ? ${requesterVisibleOnly ? "AND visible_to_requester = 1" : ""}
        ORDER BY created_at ASC`
     )
     .all(ticketId);
 }
 
+// For the agent-side download route: no visibility filter, agents can pull
+// any attachment on a ticket regardless of the flag.
 function getAttachment(ticketId, attachmentId) {
   return db
     .prepare("SELECT * FROM attachments WHERE id = ? AND ticket_id = ?")
+    .get(attachmentId, ticketId);
+}
+
+// For the public (/status) download route: the visibility filter is
+// enforced here too, not just on the listing - otherwise a requester who
+// guesses/enumerates an attachment id could fetch an internal-only file
+// directly even though it's never listed for them.
+function getPublicAttachment(ticketId, attachmentId) {
+  return db
+    .prepare("SELECT * FROM attachments WHERE id = ? AND ticket_id = ? AND visible_to_requester = 1")
     .get(attachmentId, ticketId);
 }
 
@@ -146,5 +167,6 @@ module.exports = {
   deleteUploadedFiles,
   attachmentsForTicket,
   getAttachment,
+  getPublicAttachment,
   formatSize,
 };

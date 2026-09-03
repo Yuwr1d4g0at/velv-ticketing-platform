@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node src/db/seed.js",
+    "backup": "node scripts/backup.js",
     "test": "node --test"
   },
   "engines": {

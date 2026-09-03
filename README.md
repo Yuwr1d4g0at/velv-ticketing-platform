@@ -56,33 +56,52 @@ Visit `http://localhost:3000` for the request form, and
 ## How it works
 
 **Public (no login required)**
-- `/` — request form (name, email, category, subject, description, optional file attachments). Priority isn't set here — see below. Submitting shows a ticket number and, if email is configured, sends a confirmation.
+- `/` — request form (name, email, category, subject, description, optional file attachments, optional related asset). Priority isn't set here — see below. Submitting shows a ticket number and, if email is configured, sends a confirmation.
 - `/status` — look up a ticket's status by ticket number + the email it was submitted with, including any attachments (download requires that same ticket number + email).
 
-Both of the above are rate-limited per IP (like the login form already was) since they're unauthenticated and, for the request form, now touch disk via file uploads.
+Both of the above are rate-limited per IP (like the login form already was) since they're unauthenticated and, for the request form, now touch disk via file uploads. A ticket is auto-assigned on creation to whichever active agent currently has the fewest open tickets, rather than starting Unassigned.
+
+The status page also shows the requester-visible conversation (agent replies + the requester's own past replies — never internal notes) and a reply box. Replying to a Resolved or Closed ticket reopens it. The assigned agent gets a best-effort email when the requester replies, if notifications are configured.
 
 - `/rate/:token` — a one-click satisfaction survey (1–5 stars + optional comment). The link is emailed automatically the moment a ticket is marked Resolved (only if email is configured); the token is a bearer link, not a login, since rating a ticket doesn't expose anything sensitive.
 
-**Dashboard (login required, any agent account)**
-- `/dashboard` — all tickets, paginated, with counts by status, a filter bar (status/priority/category/assignment/tag/search), and a CSV export of whatever's currently filtered. Tickets still open past a few days are flagged so nothing quietly ages out of sight. Shows the running average satisfaction rating once there's at least one.
-- `/dashboard/tickets/:id` — full ticket detail: set priority, change status (emails the requester if notifications are configured), assign/reassign to any agent, add/remove freeform tags, and add internal notes (optionally with their own attachments, or inserted from a canned response). Every change is logged automatically alongside manual notes in the ticket's activity feed.
+**Dashboard (login required, any active agent account)**
+- `/dashboard` — all tickets, paginated, with counts by status, a filter bar (status/priority/category/assignment/tag/search), bulk status-change/reassignment (select rows, apply to all of them), and a CSV export of whatever's currently filtered. Tickets still open past a priority-scaled threshold (Urgent ages fastest, Low slowest) are flagged so nothing quietly ages out of sight. Shows the running average satisfaction rating and average time-to-resolution once there's at least one.
+- `/dashboard/tickets/:id` — full ticket detail: set priority, change status (emails the requester if notifications are configured), assign/reassign to any active agent, link/change/unlink the related asset, add/remove freeform tags, and add notes — internal by default, or marked "visible to requester" to reply publicly (emailed to them too). Shows the requester's other tickets, for context. Every change is logged automatically alongside manual notes in the ticket's activity feed.
+- `/dashboard/assets` — a small asset-management view: add/edit company equipment or software (name, tag, category, status, who has it, location, serial number, vendor, purchase date, warranty, notes), and see every ticket ever raised against one from its own page. Never hard-deleted, same philosophy as agents — retire it instead. Retired/Lost assets stop showing up as a pickable option (the request form, the ticket-linking dropdown) but stay reachable and editable.
 - `/dashboard/canned-responses` — a shared library of reusable note text any agent can insert into a note in one click.
-- `/dashboard/agents` — list of agents and a form to add new ones. All agents currently share one role — anyone logged in can manage any ticket and add other agents.
+- `/dashboard/agents` — list of agents (active and deactivated) and a form to add new ones, plus deactivate/reactivate. All agents currently share one role — anyone logged in can manage any ticket and add other agents. Deactivating (never deleting, to keep their activity history intact) revokes login immediately, even for an already-open session, and excludes them from new assignments; you can't deactivate your own account or the last active agent.
 
 ## Data
 
 Everything lives in a single SQLite file at `data/tickets.sqlite` (path
-configurable via `DB_PATH`). Back it up by copying that one file — take the
-copy while the app isn't writing to it, or use SQLite's `.backup` command for
-a safe live copy. `data/sessions.sqlite`-style session storage is actually in
-the same file, in a `sessions` table.
+configurable via `DB_PATH`). `data/sessions.sqlite`-style session storage is
+actually in the same file, in a `sessions` table.
 
 Uploaded attachments live on disk under `data/attachments/`, named with a
-random id (never the original filename), with the real filename, size, and
-uploader kept in the database. Back that folder up alongside the database
-file — a copy of one without the other leaves either orphaned files or
-attachment rows with nothing to download. Limits (file types, size, count
-per upload) are constants in `src/attachments.js`.
+random id (never the original filename), with the real filename, size,
+uploader, and whether the requester can see it kept in the database.
+
+### Backups
+
+```bash
+npm run backup
+```
+
+Writes a timestamped, consistent snapshot of the database (via SQLite's
+`VACUUM INTO` — safe to run while the app is live, unlike a plain file copy)
+plus a copy of `data/attachments/` to `data/backups/<timestamp>/`. A copy of
+one without the other leaves either orphaned files or attachment rows with
+nothing to download, so the script always takes both together. Keeps the 14
+most recent backups by default and prunes older ones — override with
+`BACKUP_DIR` / `BACKUP_KEEP` in `.env`.
+
+Not scheduled on its own; add a cron entry to actually run it automatically,
+e.g. nightly at 3am:
+
+```
+0 3 * * * cd /path/to/app && /usr/bin/npm run backup >> logs/backup.log 2>&1
+```
 
 ## Deploying
 
