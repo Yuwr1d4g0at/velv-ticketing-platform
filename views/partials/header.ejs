@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> · Velv Ticketing</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="<%= typeof currentAgent !== 'undefined' && currentAgent ? '/dashboard' : '/' %>">Velv Ticketing</a>
+      <nav class="main-nav">
+        <% if (typeof currentAgent !== 'undefined' && currentAgent) { %>
+          <a href="/dashboard">Dashboard</a>
+          <a href="/dashboard/agents">Agents</a>
+          <span class="nav-user">Signed in as <%= currentAgent.name %></span>
+          <form action="/logout" method="POST" class="inline-form">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button type="submit" class="link-button">Log out</button>
+          </form>
+        <% } else { %>
+          <a href="/">Submit a request</a>
+          <a href="/status">Check status</a>
+          <a href="/login">Helpdesk login</a>
+        <% } %>
+      </nav>
+    </div>
+  </header>
+  <main class="page">

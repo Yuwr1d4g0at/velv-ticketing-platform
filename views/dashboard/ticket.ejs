@@ -1,0 +1,77 @@
+<%- include('../partials/header') %>
+<div class="ticket-head">
+  <div>
+    <h1>#<%= ticket.id %> &middot; <%= ticket.subject %></h1>
+    <p class="muted">
+      From <%= ticket.requester_name %> (<%= ticket.requester_email %>) &middot; opened <%= ticket.created_at %>
+    </p>
+  </div>
+  <div class="badge-group">
+    <span class="badge badge-priority-<%= ticket.priority.toLowerCase() %>"><%= ticket.priority %></span>
+    <span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span>
+  </div>
+</div>
+
+<div class="ticket-grid">
+  <div class="ticket-main">
+    <div class="card">
+      <h2>Description</h2>
+      <p class="preserve-newlines"><%= ticket.description %></p>
+      <p class="muted">Category: <%= ticket.category %></p>
+    </div>
+
+    <div class="card">
+      <h2>Activity</h2>
+      <ul class="activity-feed">
+        <% if (!activity.length) { %>
+          <li class="muted">No activity yet.</li>
+        <% } %>
+        <% activity.forEach(function(a) { %>
+          <li class="activity-item activity-<%= a.type %>">
+            <div class="activity-meta"><strong><%= a.agent_name %></strong> &middot; <%= a.created_at %></div>
+            <div class="activity-body <%= a.type !== 'note' ? 'muted' : '' %>"><%= a.body %></div>
+          </li>
+        <% }) %>
+      </ul>
+
+      <form action="/dashboard/tickets/<%= ticket.id %>/note" method="POST" class="stacked-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <label for="body">Add a note</label>
+        <textarea id="body" name="body" rows="3" maxlength="5000" required placeholder="Internal note, visible to helpdesk staff only"></textarea>
+        <button type="submit" class="button-primary">Add note</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="ticket-side">
+    <div class="card">
+      <h2>Status</h2>
+      <form action="/dashboard/tickets/<%= ticket.id %>/status" method="POST" class="stacked-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <select name="status">
+          <% statuses.forEach(function(s) { %>
+            <option value="<%= s %>" <%= ticket.status === s ? 'selected' : '' %>><%= s %></option>
+          <% }) %>
+        </select>
+        <button type="submit" class="button-secondary">Update status</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Assignment</h2>
+      <form action="/dashboard/tickets/<%= ticket.id %>/assign" method="POST" class="stacked-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <select name="assigned_to">
+          <option value="">Unassigned</option>
+          <% agents.forEach(function(a) { %>
+            <option value="<%= a.id %>" <%= ticket.assigned_to === a.id ? 'selected' : '' %>><%= a.name %></option>
+          <% }) %>
+        </select>
+        <button type="submit" class="button-secondary">Update assignment</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<p><a href="/dashboard">&larr; Back to all tickets</a></p>
+<%- include('../partials/footer') %>

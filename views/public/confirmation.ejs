@@ -1,0 +1,12 @@
+<%- include('../partials/header') %>
+<div class="card">
+  <h1>Request submitted</h1>
+  <p>Thanks, <strong>#<%= ticket.id %></strong> is your ticket number &mdash; save it to check on the status later.</p>
+  <dl class="def-list">
+    <dt>Subject</dt><dd><%= ticket.subject %></dd>
+    <dt>Status</dt><dd><span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span></dd>
+    <dt>Submitted</dt><dd><%= ticket.created_at %></dd>
+  </dl>
+  <p><a href="/">&larr; Submit another request</a> &nbsp;|&nbsp; <a href="/status">Check ticket status</a></p>
+</div>
+<%- include('../partials/footer') %>

@@ -1,0 +1,46 @@
+<%- include('../partials/header') %>
+<h1>Agents</h1>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Open tickets assigned</th>
+        <th>Added</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% agents.forEach(function(a) { %>
+        <tr>
+          <td><%= a.name %></td>
+          <td><%= a.email %></td>
+          <td><%= a.open_count %></td>
+          <td><%= a.created_at %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card card-narrow">
+  <h2>Add an agent</h2>
+  <% if (error) { %>
+    <div class="alert alert-error"><%= error %></div>
+  <% } %>
+  <form action="/dashboard/agents" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" required maxlength="200">
+
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" required maxlength="200">
+
+    <label for="password">Temporary password (min 8 characters)</label>
+    <input type="password" id="password" name="password" required minlength="8">
+
+    <button type="submit" class="button-primary">Add agent</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

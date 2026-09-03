@@ -1,0 +1,34 @@
+<%- include('../partials/header') %>
+<div class="card">
+  <h1>Check ticket status</h1>
+  <p class="muted">Enter your ticket number and the email address you used to submit it.</p>
+
+  <% if (error) { %>
+    <div class="alert alert-error"><%= error %></div>
+  <% } %>
+
+  <form action="/status" method="POST" class="stacked-form">
+    <label for="ticket_id">Ticket number</label>
+    <input type="number" id="ticket_id" name="ticket_id" min="1" required>
+
+    <label for="requester_email">Email used to submit it</label>
+    <input type="email" id="requester_email" name="requester_email" required maxlength="200">
+
+    <button type="submit" class="button-primary">Check status</button>
+  </form>
+
+  <% if (ticket) { %>
+    <hr>
+    <h2>Ticket #<%= ticket.id %></h2>
+    <dl class="def-list">
+      <dt>Subject</dt><dd><%= ticket.subject %></dd>
+      <dt>Category</dt><dd><%= ticket.category %></dd>
+      <dt>Priority</dt><dd><%= ticket.priority %></dd>
+      <dt>Status</dt><dd><span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span></dd>
+      <dt>Description</dt><dd><%= ticket.description %></dd>
+      <dt>Submitted</dt><dd><%= ticket.created_at %></dd>
+      <dt>Last updated</dt><dd><%= ticket.updated_at %></dd>
+    </dl>
+  <% } %>
+</div>
+<%- include('../partials/footer') %>
