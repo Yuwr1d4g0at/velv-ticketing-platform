@@ -1,49 +1,46 @@
 <%- include('../partials/header') %>
-<div class="card">
+<div class="card card-medium">
   <h1>Submit a request</h1>
   <p class="muted">Tell us what's going on and we'll get back to you. You'll get a ticket number to track its status.</p>
 
   <% if (errors && errors.length) { %>
     <div class="alert alert-error">
+      <span class="icon icon-alert-triangle"></span>
       <ul>
         <% errors.forEach(function(err) { %><li><%= err %></li><% }) %>
       </ul>
     </div>
   <% } %>
 
-  <form action="/" method="POST" class="stacked-form">
-    <label for="requester_name">Your name</label>
-    <input type="text" id="requester_name" name="requester_name" value="<%= values.requester_name || '' %>" required maxlength="200">
-
-    <label for="requester_email">Your email</label>
-    <input type="email" id="requester_email" name="requester_email" value="<%= values.requester_email || '' %>" required maxlength="200">
-
+  <form action="/" method="POST" class="stacked-form" enctype="multipart/form-data">
     <div class="form-row">
       <div>
-        <label for="category">Category</label>
-        <select id="category" name="category" required>
-          <option value="" disabled <%= !values.category ? 'selected' : '' %>>Choose one&hellip;</option>
-          <% categories.forEach(function(c) { %>
-            <option value="<%= c %>" <%= values.category === c ? 'selected' : '' %>><%= c %></option>
-          <% }) %>
-        </select>
+        <label for="requester_name">Your name</label>
+        <input type="text" id="requester_name" name="requester_name" value="<%= values.requester_name || '' %>" required maxlength="200">
       </div>
       <div>
-        <label for="priority">Priority</label>
-        <select id="priority" name="priority" required>
-          <option value="" disabled <%= !values.priority ? 'selected' : '' %>>Choose one&hellip;</option>
-          <% priorities.forEach(function(p) { %>
-            <option value="<%= p %>" <%= values.priority === p ? 'selected' : '' %>><%= p %></option>
-          <% }) %>
-        </select>
+        <label for="requester_email">Your email</label>
+        <input type="email" id="requester_email" name="requester_email" value="<%= values.requester_email || '' %>" required maxlength="200">
       </div>
     </div>
+
+    <label for="category">Category</label>
+    <select id="category" name="category" required>
+      <option value="" disabled <%= !values.category ? 'selected' : '' %>>Choose one&hellip;</option>
+      <% categories.forEach(function(c) { %>
+        <option value="<%= c %>" <%= values.category === c ? 'selected' : '' %>><%= c %></option>
+      <% }) %>
+    </select>
 
     <label for="subject">Subject</label>
     <input type="text" id="subject" name="subject" value="<%= values.subject || '' %>" required maxlength="200">
 
     <label for="description">Description</label>
     <textarea id="description" name="description" rows="6" required maxlength="5000"><%= values.description || '' %></textarea>
+
+    <label for="attachments">Attachments</label>
+    <input type="file" id="attachments" name="attachments" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.csv">
+    <p class="field-hint"><%= uploadHint %></p>
 
     <button type="submit" class="button-primary">Submit request</button>
   </form>

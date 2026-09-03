@@ -7,9 +7,30 @@
     </p>
   </div>
   <div class="badge-group">
+    <% if (aging) { %><span class="badge badge-aging">Aging</span><% } %>
     <span class="badge badge-priority-<%= ticket.priority.toLowerCase() %>"><%= ticket.priority %></span>
     <span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span>
   </div>
+</div>
+
+<div class="tag-row">
+  <% tags.forEach(function(t) { %>
+    <span class="tag-chip">
+      <%= t.name %>
+      <form action="/dashboard/tickets/<%= ticket.id %>/tags/<%= t.id %>/remove" method="POST" class="inline-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button type="submit" aria-label="Remove tag <%= t.name %>">&times;</button>
+      </form>
+    </span>
+  <% }) %>
+  <form action="/dashboard/tickets/<%= ticket.id %>/tags" method="POST" class="tag-add-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <input type="text" name="tag" placeholder="Add a tag&hellip;" maxlength="30" list="existing-tags">
+    <datalist id="existing-tags">
+      <% allTags.forEach(function(t) { %><option value="<%= t.name %>"><% }) %>
+    </datalist>
+    <button type="submit" class="button-secondary">Add tag</button>
+  </form>
 </div>
 
 <div class="ticket-grid">
@@ -18,6 +39,31 @@
       <h2>Description</h2>
       <p class="preserve-newlines"><%= ticket.description %></p>
       <p class="muted">Category: <%= ticket.category %></p>
+
+      <% if (rating) { %>
+        <h2>Satisfaction rating</h2>
+        <p class="rating-stars" aria-label="<%= rating.rating %> out of 5 stars">
+          <% for (let i = 1; i <= 5; i++) { %><span class="icon icon-star <%= i <= rating.rating ? 'is-filled' : '' %>"></span><% } %>
+        </p>
+        <% if (rating.comment) { %><p class="preserve-newlines"><%= rating.comment %></p><% } %>
+      <% } %>
+
+      <% if (attachments.length) { %>
+        <h2>Attachments</h2>
+        <ul class="attachment-list">
+          <% attachments.forEach(function(a) { %>
+            <li class="attachment-item">
+              <span class="attachment-name"><%= a.original_name %></span>
+              <span class="attachment-meta">
+                <%= a.uploaded_by === 'agent' ? a.agent_name : ticket.requester_name %> &middot; <%= a.size_label %>
+              </span>
+              <a class="attachment-download-btn" href="/dashboard/tickets/<%= ticket.id %>/attachments/<%= a.id %>/download">
+                <span class="icon icon-download"></span>Download
+              </a>
+            </li>
+          <% }) %>
+        </ul>
+      <% } %>
     </div>
 
     <div class="card">
@@ -34,16 +80,44 @@
         <% }) %>
       </ul>
 
-      <form action="/dashboard/tickets/<%= ticket.id %>/note" method="POST" class="stacked-form">
+      <form action="/dashboard/tickets/<%= ticket.id %>/note" method="POST" class="stacked-form" enctype="multipart/form-data">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <% if (cannedResponses.length) { %>
+          <label for="canned-select">Insert a canned response</label>
+          <select id="canned-select" data-target="body">
+            <option value="">Choose one&hellip;</option>
+            <% cannedResponses.forEach(function(c) { %>
+              <option value="<%= c.body.replace(/"/g, '&quot;') %>"><%= c.title %></option>
+            <% }) %>
+          </select>
+        <% } %>
+
         <label for="body">Add a note</label>
-        <textarea id="body" name="body" rows="3" maxlength="5000" required placeholder="Internal note, visible to helpdesk staff only"></textarea>
+        <textarea id="body" name="body" rows="3" maxlength="5000" placeholder="Internal note, visible to helpdesk staff only"></textarea>
+
+        <label for="note-attachments">Attach a file</label>
+        <input type="file" id="note-attachments" name="attachments" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.csv">
+        <p class="field-hint"><%= uploadHint %></p>
+
         <button type="submit" class="button-primary">Add note</button>
       </form>
     </div>
   </div>
 
   <div class="ticket-side">
+    <div class="card">
+      <h2>Priority</h2>
+      <form action="/dashboard/tickets/<%= ticket.id %>/priority" method="POST" class="stacked-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <select name="priority">
+          <% priorities.forEach(function(p) { %>
+            <option value="<%= p %>" <%= ticket.priority === p ? 'selected' : '' %>><%= p %></option>
+          <% }) %>
+        </select>
+        <button type="submit" class="button-secondary">Update priority</button>
+      </form>
+    </div>
+
     <div class="card">
       <h2>Status</h2>
       <form action="/dashboard/tickets/<%= ticket.id %>/status" method="POST" class="stacked-form">

@@ -1,7 +1,8 @@
 <%- include('partials/header') %>
-<div class="card">
+<div class="card card-narrow">
+  <span class="card-icon tone-warning"><span class="icon icon-alert-triangle"></span></span>
   <h1><%= title %></h1>
-  <p><%= message %></p>
-  <p><a href="/">&larr; Back to home</a></p>
+  <p class="muted"><%= message %></p>
+  <a href="/" class="button-secondary">&larr; Back to home</a>
 </div>
 <%- include('partials/footer') %>

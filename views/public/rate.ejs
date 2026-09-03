@@ -1,0 +1,31 @@
+<%- include('../partials/header') %>
+<div class="card card-narrow">
+  <% if (alreadyRated) { %>
+    <span class="card-icon tone-success"><span class="icon icon-check-circle"></span></span>
+    <h1>Thanks for the feedback!</h1>
+    <p class="muted">Your rating for ticket #<%= ticket.id %> ("<%= ticket.subject %>") has been recorded.</p>
+  <% } else { %>
+    <span class="card-icon"><span class="icon icon-star"></span></span>
+    <h1>How did we do?</h1>
+    <p class="muted">Ticket #<%= ticket.id %> &middot; <%= ticket.subject %></p>
+
+    <% if (error) { %>
+      <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
+    <% } %>
+
+    <form action="/rate/<%= token %>" method="POST" class="stacked-form star-rating-form">
+      <div class="star-rating">
+        <% for (let i = 5; i >= 1; i--) { %>
+          <input type="radio" name="rating" id="star-<%= i %>" value="<%= i %>">
+          <label for="star-<%= i %>" title="<%= i %> star<%= i > 1 ? 's' : '' %>"><span class="icon icon-star"></span></label>
+        <% } %>
+      </div>
+
+      <label for="comment">Anything you'd like to add? (optional)</label>
+      <textarea id="comment" name="comment" rows="4" maxlength="2000"></textarea>
+
+      <button type="submit" class="button-primary">Submit rating</button>
+    </form>
+  <% } %>
+</div>
+<%- include('../partials/footer') %>

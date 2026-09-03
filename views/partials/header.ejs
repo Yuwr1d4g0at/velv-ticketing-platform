@@ -3,28 +3,48 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
   <title><%= title %> · Velv Ticketing</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/theme-init.js"></script>
 </head>
 <body>
   <header class="site-header">
     <div class="site-header-inner">
-      <a class="brand" href="<%= typeof currentAgent !== 'undefined' && currentAgent ? '/dashboard' : '/' %>">Velv Ticketing</a>
-      <nav class="main-nav">
-        <% if (typeof currentAgent !== 'undefined' && currentAgent) { %>
-          <a href="/dashboard">Dashboard</a>
-          <a href="/dashboard/agents">Agents</a>
-          <span class="nav-user">Signed in as <%= currentAgent.name %></span>
-          <form action="/logout" method="POST" class="inline-form">
-            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-            <button type="submit" class="link-button">Log out</button>
-          </form>
-        <% } else { %>
-          <a href="/">Submit a request</a>
-          <a href="/status">Check status</a>
-          <a href="/login">Helpdesk login</a>
-        <% } %>
-      </nav>
+      <a class="brand" href="<%= typeof currentAgent !== 'undefined' && currentAgent ? '/dashboard' : '/' %>">
+        <img class="brand-logo brand-logo-light" src="/img/velv-logo-purple.png" alt="Velv">
+        <img class="brand-logo brand-logo-dark" src="/img/velv-logo-white.png" alt="Velv">
+        <span class="brand-suffix">Ticketing</span>
+      </a>
+      <div class="nav-cluster">
+        <nav class="main-nav">
+          <% if (typeof currentAgent !== 'undefined' && currentAgent) { %>
+            <a href="/dashboard">Dashboard</a>
+            <a href="/dashboard/agents">Agents</a>
+            <a href="/dashboard/canned-responses">Responses</a>
+            <span class="nav-user">Signed in as <%= currentAgent.name %></span>
+            <form action="/logout" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button">Log out</button>
+            </form>
+          <% } else { %>
+            <a href="/">Submit a request</a>
+            <a href="/status">Check status</a>
+            <a href="/login" class="nav-cta">Helpdesk login</a>
+          <% } %>
+        </nav>
+        <label class="lights-toggle">
+          <input type="checkbox" id="lights-switch" checked>
+          <span class="lights-track">
+            <span class="icon icon-sun"></span>
+            <span class="icon icon-moon"></span>
+            <span class="lights-thumb"></span>
+          </span>
+          <span class="lights-label">Lights</span>
+        </label>
+      </div>
     </div>
   </header>
   <main class="page">

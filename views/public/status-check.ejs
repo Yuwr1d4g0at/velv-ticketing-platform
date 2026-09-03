@@ -1,10 +1,10 @@
 <%- include('../partials/header') %>
-<div class="card">
+<div class="card card-medium">
   <h1>Check ticket status</h1>
   <p class="muted">Enter your ticket number and the email address you used to submit it.</p>
 
   <% if (error) { %>
-    <div class="alert alert-error"><%= error %></div>
+    <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
   <% } %>
 
   <form action="/status" method="POST" class="stacked-form">
@@ -29,6 +29,23 @@
       <dt>Submitted</dt><dd><%= ticket.created_at %></dd>
       <dt>Last updated</dt><dd><%= ticket.updated_at %></dd>
     </dl>
+
+    <% if (attachments.length) { %>
+      <h2>Attachments</h2>
+      <ul class="attachment-list">
+        <% attachments.forEach(function(a) { %>
+          <li class="attachment-item">
+            <span class="attachment-name"><%= a.original_name %></span>
+            <span class="attachment-meta"><%= a.size_label %></span>
+            <form class="attachment-download-form" action="/status/attachments/<%= a.id %>/download" method="POST">
+              <input type="hidden" name="ticket_id" value="<%= ticket.id %>">
+              <input type="hidden" name="requester_email" value="<%= ticket.requester_email %>">
+              <button type="submit" class="attachment-download-btn"><span class="icon icon-download"></span>Download</button>
+            </form>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
   <% } %>
 </div>
 <%- include('../partials/footer') %>

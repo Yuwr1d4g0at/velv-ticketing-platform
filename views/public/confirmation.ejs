@@ -1,11 +1,16 @@
 <%- include('../partials/header') %>
-<div class="card">
+<div class="card card-narrow">
+  <span class="card-icon tone-success"><span class="icon icon-check-circle"></span></span>
   <h1>Request submitted</h1>
   <p>Thanks, <strong>#<%= ticket.id %></strong> is your ticket number &mdash; save it to check on the status later.</p>
   <dl class="def-list">
     <dt>Subject</dt><dd><%= ticket.subject %></dd>
     <dt>Status</dt><dd><span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span></dd>
     <dt>Submitted</dt><dd><%= ticket.created_at %></dd>
+    <% if (attachments.length) { %>
+      <dt>Attachments</dt>
+      <dd><%= attachments.map(function(a) { return a.original_name; }).join(', ') %></dd>
+    <% } %>
   </dl>
   <p><a href="/">&larr; Submit another request</a> &nbsp;|&nbsp; <a href="/status">Check ticket status</a></p>
 </div>

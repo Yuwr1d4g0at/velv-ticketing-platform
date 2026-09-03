@@ -3,11 +3,17 @@
   <h1>Dashboard</h1>
   <div class="stat-row">
     <% statuses.forEach(function(s) { %>
-      <div class="stat-tile">
+      <div class="stat-tile stat-tile-<%= s.replace(/\s+/g, '-').toLowerCase() %>">
         <span class="stat-count"><%= counts[s] || 0 %></span>
         <span class="stat-label"><%= s %></span>
       </div>
     <% }) %>
+    <% if (satisfaction.count) { %>
+      <div class="stat-tile stat-tile-satisfaction">
+        <span class="stat-count"><span class="icon icon-star is-filled"></span> <%= satisfaction.avg_rating.toFixed(1) %></span>
+        <span class="stat-label">Satisfaction &middot; <%= satisfaction.count %> rating<%= satisfaction.count === 1 ? '' : 's' %></span>
+      </div>
+    <% } %>
   </div>
 </div>
 
@@ -41,8 +47,20 @@
     <option value="unassigned" <%= filters.assigned === 'unassigned' ? 'selected' : '' %>>Unassigned</option>
   </select>
 
+  <% if (allTags.length) { %>
+    <select name="tag">
+      <option value="">All tags</option>
+      <% allTags.forEach(function(t) { %>
+        <option value="<%= t.name %>" <%= filters.tag === t.name ? 'selected' : '' %>><%= t.name %></option>
+      <% }) %>
+    </select>
+  <% } %>
+
   <button type="submit" class="button-secondary">Filter</button>
   <a href="/dashboard" class="button-secondary button-ghost">Reset</a>
+  <a href="/dashboard/export.csv?<%= exportQuery %>" class="button-secondary button-ghost">
+    <span class="icon icon-download"></span> Export CSV
+  </a>
 </form>
 
 <div class="table-wrap">
@@ -66,7 +84,10 @@
       <% tickets.forEach(function(t) { %>
         <tr>
           <td><a href="/dashboard/tickets/<%= t.id %>">#<%= t.id %></a></td>
-          <td><a href="/dashboard/tickets/<%= t.id %>"><%= t.subject %></a></td>
+          <td>
+            <a href="/dashboard/tickets/<%= t.id %>"><%= t.subject %></a>
+            <% if (t.is_aging) { %><span class="badge badge-aging">Aging</span><% } %>
+          </td>
           <td><%= t.requester_name %></td>
           <td><%= t.category %></td>
           <td><span class="badge badge-priority-<%= t.priority.toLowerCase() %>"><%= t.priority %></span></td>
@@ -78,4 +99,20 @@
     </tbody>
   </table>
 </div>
+
+<% if (totalPages > 1) { %>
+  <nav class="pagination">
+    <% if (page > 1) { %>
+      <a class="button-secondary" href="/dashboard?<%= exportQuery %>&page=<%= page - 1 %>">&larr; Previous</a>
+    <% } else { %>
+      <span class="button-secondary" aria-disabled="true">&larr; Previous</span>
+    <% } %>
+    <span class="pagination-status">Page <%= page %> of <%= totalPages %> &middot; <%= totalCount %> ticket<%= totalCount === 1 ? '' : 's' %></span>
+    <% if (page < totalPages) { %>
+      <a class="button-secondary" href="/dashboard?<%= exportQuery %>&page=<%= page + 1 %>">Next &rarr;</a>
+    <% } else { %>
+      <span class="button-secondary" aria-disabled="true">Next &rarr;</span>
+    <% } %>
+  </nav>
+<% } %>
 <%- include('../partials/footer') %>

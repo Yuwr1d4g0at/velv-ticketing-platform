@@ -1,0 +1,50 @@
+<%- include('../partials/header') %>
+<h1>Canned responses</h1>
+<p class="muted">Reusable note text any agent can insert into a ticket note in one click. Shared by the whole team.</p>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Body</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!responses.length) { %>
+        <tr><td colspan="3" class="empty-row">No canned responses yet.</td></tr>
+      <% } %>
+      <% responses.forEach(function(r) { %>
+        <tr>
+          <td><%= r.title %></td>
+          <td class="preserve-newlines"><%= r.body %></td>
+          <td>
+            <form action="/dashboard/canned-responses/<%= r.id %>/delete" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button">Delete</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card card-medium">
+  <h2>Add a canned response</h2>
+  <% if (error) { %>
+    <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
+  <% } %>
+  <form action="/dashboard/canned-responses" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label for="title">Title</label>
+    <input type="text" id="title" name="title" required maxlength="80" placeholder="Ask for a screenshot">
+
+    <label for="body">Body</label>
+    <textarea id="body" name="body" rows="4" required maxlength="5000" placeholder="Could you send a screenshot of the error message?"></textarea>
+
+    <button type="submit" class="button-primary">Add response</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>
