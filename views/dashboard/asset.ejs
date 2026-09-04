@@ -14,7 +14,7 @@
     <div class="card">
       <h2>Details</h2>
       <% if (error) { %>
-        <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
+        <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
       <% } %>
       <form action="/dashboard/assets/<%= asset.id %>" method="POST" class="stacked-form">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">

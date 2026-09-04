@@ -1,0 +1,61 @@
+<%- include('../partials/header') %>
+<h1>Ticket templates</h1>
+<p class="muted">Pre-filled starting points for <a href="/dashboard/tickets/new">agent-initiated tickets</a> - common recurring requests like "New hire onboarding" or "VPN access".</p>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Category</th>
+        <th scope="col">Subject</th>
+        <th scope="col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!templates.length) { %>
+        <tr><td colspan="4" class="empty-row">No templates yet.</td></tr>
+      <% } %>
+      <% templates.forEach(function(t) { %>
+        <tr>
+          <td><%= t.name %></td>
+          <td><%= t.category %></td>
+          <td><%= t.subject %></td>
+          <td>
+            <form action="/dashboard/templates/<%= t.id %>/delete" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button">Delete</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card card-medium">
+  <h2>Add a template</h2>
+  <% if (error) { %>
+    <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+  <% } %>
+  <form action="/dashboard/templates" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label for="name">Template name</label>
+    <input type="text" id="name" name="name" required maxlength="100" placeholder="New hire onboarding">
+
+    <label for="category">Category</label>
+    <select id="category" name="category" required>
+      <option value="" disabled selected>Choose one&hellip;</option>
+      <% categories.forEach(function(c) { %><option value="<%= c %>"><%= c %></option><% }) %>
+    </select>
+
+    <label for="subject">Subject</label>
+    <input type="text" id="subject" name="subject" required maxlength="200" placeholder="New hire equipment setup">
+
+    <label for="description">Description</label>
+    <textarea id="description" name="description" rows="5" required maxlength="5000"></textarea>
+
+    <button type="submit" class="button-primary">Add template</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

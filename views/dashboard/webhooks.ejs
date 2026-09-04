@@ -1,0 +1,61 @@
+<%- include('../partials/header') %>
+<h1>Webhooks</h1>
+<p class="muted">POST a signed JSON payload to a URL you choose when something happens. Each payload is signed with that webhook's own secret (HMAC-SHA256, in an <code>X-Velv-Signature</code> header) so the receiving end can verify it actually came from here.</p>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">URL</th>
+        <th scope="col">Events</th>
+        <th scope="col">Status</th>
+        <th scope="col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!webhooks.length) { %>
+        <tr><td colspan="4" class="empty-row">No webhooks configured.</td></tr>
+      <% } %>
+      <% webhooks.forEach(function(w) { %>
+        <tr>
+          <td class="overflow-wrap-anywhere"><%= w.url %></td>
+          <td><%= w.events.split(',').join(', ') %></td>
+          <td><span class="badge <%= w.active ? 'badge-status-open' : 'badge-status-closed' %>"><%= w.active ? 'Active' : 'Paused' %></span></td>
+          <td>
+            <form action="/dashboard/settings/webhooks/<%= w.id %>/toggle" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button"><%= w.active ? 'Pause' : 'Resume' %></button>
+            </form>
+            <form action="/dashboard/settings/webhooks/<%= w.id %>/delete" method="POST" class="inline-form" data-confirm="Delete this webhook? It'll stop receiving events immediately.">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button">Delete</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card card-medium">
+  <h2>Add a webhook</h2>
+  <% if (error) { %>
+    <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+  <% } %>
+  <form action="/dashboard/settings/webhooks" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label for="url">URL</label>
+    <input type="url" id="url" name="url" required placeholder="https://example.com/webhooks/velv">
+
+    <label class="split-legend">Events</label>
+    <% events.forEach(function(e) { %>
+      <label class="checkbox-label">
+        <input type="checkbox" name="events" value="<%= e %>">
+        <%= e %>
+      </label>
+    <% }) %>
+
+    <button type="submit" class="button-primary">Add webhook</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

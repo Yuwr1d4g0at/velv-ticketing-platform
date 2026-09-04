@@ -30,12 +30,12 @@
   <table class="ticket-table">
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Tag</th>
-        <th>Category</th>
-        <th>Status</th>
-        <th>Assigned to</th>
-        <th>Location</th>
+        <th scope="col">Name</th>
+        <th scope="col">Tag</th>
+        <th scope="col">Category</th>
+        <th scope="col">Status</th>
+        <th scope="col">Assigned to</th>
+        <th scope="col">Location</th>
       </tr>
     </thead>
     <tbody>
@@ -47,7 +47,10 @@
           <td><a href="/dashboard/assets/<%= a.id %>"><%= a.name %></a></td>
           <td><% if (a.asset_tag) { %><%= a.asset_tag %><% } else { %>&mdash;<% } %></td>
           <td><%= a.category %></td>
-          <td><span class="badge badge-asset-status-<%= a.status.replace(/\s+/g, '-').toLowerCase() %>"><%= a.status %></span></td>
+          <td>
+            <span class="badge badge-asset-status-<%= a.status.replace(/\s+/g, '-').toLowerCase() %>"><%= a.status %></span>
+            <% if (a.warranty_expired) { %><span class="badge badge-aging">Warranty expired</span><% } else if (a.warranty_expiring_soon) { %><span class="badge badge-aging">Warranty expiring</span><% } %>
+          </td>
           <td><% if (a.assigned_to_name) { %><%= a.assigned_to_name %><% } else { %>&mdash;<% } %></td>
           <td><% if (a.location) { %><%= a.location %><% } else { %>&mdash;<% } %></td>
         </tr>
@@ -67,7 +70,7 @@
 <div class="card card-medium" id="add-asset-panel" <%= error ? '' : 'hidden' %>>
   <h2>Add an asset</h2>
   <% if (error) { %>
-    <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
+    <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
   <% } %>
   <form action="/dashboard/assets" method="POST" class="stacked-form">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">

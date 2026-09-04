@@ -4,7 +4,7 @@
   <p class="muted"><%= t('submit_request_intro') %></p>
 
   <% if (errors && errors.length) { %>
-    <div class="alert alert-error">
+    <div class="alert alert-error" role="alert">
       <span class="icon icon-alert-triangle"></span>
       <ul>
         <% errors.forEach(function(err) { %><li><%= err %></li><% }) %>
@@ -41,6 +41,15 @@
           <% }) %>
         </select>
       <% } %>
+
+      <% Object.keys(customFieldsByCategory).forEach(function(cat) { %>
+        <div data-custom-fields="<%= cat %>" <%= values.category === cat ? '' : 'hidden' %>>
+          <% customFieldsByCategory[cat].forEach(function(f) { %>
+            <label for="custom_<%= f.id %>"><%= f.field_name %></label>
+            <input type="text" id="custom_<%= f.id %>" name="custom_<%= f.id %>" maxlength="500">
+          <% }) %>
+        </div>
+      <% }) %>
     </div>
 
     <div class="split-layout-main">
@@ -53,7 +62,7 @@
       <textarea id="description" name="description" rows="8" required maxlength="5000"><%= values.description || '' %></textarea>
 
       <label for="attachments"><%= t('attachments') %></label>
-      <input type="file" id="attachments" name="attachments" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.csv">
+      <input type="file" id="attachments" name="attachments" multiple data-dropzone accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.csv">
       <p class="field-hint"><%= uploadHint %></p>
     </div>
 

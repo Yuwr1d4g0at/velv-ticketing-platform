@@ -56,8 +56,9 @@ Visit `http://localhost:3000` for the request form, and
 ## How it works
 
 **Public (no login required)**
-- `/` — request form (name, email, category, subject, description, optional file attachments, optional related asset). Priority isn't set here — see below. Submitting shows a ticket number and, if email is configured, sends a confirmation. Available in English or Portuguese — the EN/PT toggle in the header sets a `velv_lang` cookie; the dashboard itself stays English-only.
+- `/` — request form (name, email, category, subject, description, optional file attachments, optional related asset, and any custom fields defined for the chosen category). Priority isn't set here — see below. Submitting shows a ticket number and, if email is configured, sends a confirmation. Available in English or Portuguese — the EN/PT toggle in the header sets a `velv_lang` cookie; the dashboard itself stays English-only. Attachments can be dragged onto the file field, not just picked from a dialog.
 - `/status` — look up a ticket's status by ticket number + the email it was submitted with, including any attachments (download requires that same ticket number + email). Image attachments (PNG/JPEG/GIF/WebP only) get a small inline preview thumbnail; everything else still only ever force-downloads.
+- `/kb` — a public, searchable help center. Agents write and publish articles from the dashboard; a request form or ticket-status page reader can browse without logging in.
 
 Both of the above are rate-limited per IP (like the login form already was) since they're unauthenticated and, for the request form, now touch disk via file uploads. A ticket is auto-assigned on creation to whichever active agent currently has the fewest open tickets, rather than starting Unassigned.
 
@@ -66,13 +67,22 @@ The status page also shows the requester-visible conversation (agent replies + t
 - `/rate/:token` — a one-click satisfaction survey (1–5 stars + optional comment). The link is emailed automatically the moment a ticket is marked Resolved (only if email is configured); the token is a bearer link, not a login, since rating a ticket doesn't expose anything sensitive.
 
 **Dashboard (login required, any active agent account)**
-- `/dashboard` — all tickets, paginated, with counts by status, a filter bar (status/priority/category/assignment/tag/**full-text search**), bulk status-change/reassignment (select rows, apply to all of them), and a CSV export of whatever's currently filtered. Search is backed by SQLite FTS5 over subject/description (prefix-matched, multi-word AND), not a plain substring match — requester name/email search is still a plain substring match. Tickets still open past a priority-scaled threshold (Urgent ages fastest, Low slowest) are flagged on the dashboard *and* proactively emailed to whoever they're assigned to (see `SLA_CHECK_INTERVAL_MINUTES` below) — once per breach, not repeatedly. Shows the running average satisfaction rating and average time-to-resolution once there's at least one. Save the current filter combo as a named view (personal to you, not shared) to jump back to it later.
-- `/dashboard/tickets/:id` — full ticket detail: set priority, change status (emails the requester if notifications are configured), assign/reassign to any active agent, link/change/unlink the related asset, add/remove freeform tags, and add notes — internal by default, or marked "visible to requester" to reply publicly (emailed to them too). Shows the requester's other tickets, for context. Every change is logged automatically alongside manual notes in the ticket's activity feed. **Merge** folds a duplicate ticket into another one (activity/attachments/tags all move over; the duplicate closes and redirects here from then on). **Requester data** is a GDPR export (JSON bundle of everything on file for that email) or erasure (redacts name/email/description/note-and-reply text across *all* of that requester's tickets, and deletes their attachment files — irreversible, confirmed before it runs).
-- `/dashboard/assets` — a small asset-management view: add/edit company equipment or software (name, tag, category, status, who has it, location, serial number, vendor, purchase date, warranty, notes), a CSV export, and see every ticket raised against one *and* a field-level change history (who changed what, and when) from its own page. Never hard-deleted, same philosophy as agents — retire it instead. Retired/Lost assets stop showing up as a pickable option (the request form, the ticket-linking dropdown) but stay reachable and editable.
+- `/dashboard` — all tickets, paginated, with counts by status, a filter bar (status/priority/category/assignment/tag/**full-text search**), bulk status-change/reassignment (select rows, apply to all of them), and a CSV export of whatever's currently filtered. Search is backed by SQLite FTS5 over subject/description (prefix-matched, multi-word AND), not a plain substring match — requester name/email search is still a plain substring match. Tickets still open past a priority-scaled threshold (Urgent ages fastest, Low slowest, counted in **business hours** — Mon-Fri 09:00-18:00, not raw calendar time, so a ticket filed Friday evening doesn't visibly age all weekend) are flagged on the dashboard *and* proactively emailed to whoever they're assigned to (see `SLA_CHECK_INTERVAL_MINUTES` below) — once per breach, not repeatedly. Shows the running average satisfaction rating, time-to-first-response, and time-to-resolution once there's at least one of each. Save the current filter combo as a named view (personal to you, not shared) to jump back to it later. A **+ New ticket** button opens agent-initiated creation (see below).
+- `/dashboard/tickets/:id` — full ticket detail: set priority, change status (emails the requester if notifications are configured), assign/reassign to any active agent, link/change/unlink the related asset, add/remove freeform tags, and add notes — internal by default, or marked "visible to requester" to reply publicly (emailed to them too). Note and description text supports a small safe subset of markdown (`**bold**`, `*italic*`, `[links](https://...)`); `@firstnamelastname` in a note emails that agent directly. **Watch** a ticket you're not assigned to, to get the same reply notifications as the assignee. A 1-2 star rating shows a banner here and emails the whole active team the moment it comes in. Shows the requester's other tickets, for context. Every change is logged automatically alongside manual notes in the ticket's activity feed. A **Possible duplicates** card suggests other open tickets with an overlapping subject (ranked by relevance, not an exact-phrase match) with a one-click merge. **Merge** folds a duplicate ticket into another one (activity/attachments/tags all move over; the duplicate closes and redirects here from then on). **Print / Save as PDF** opens a clean print-styled view (just the browser's own Print dialog, not a rendering dependency). **Requester data** is a GDPR export (JSON bundle of everything on file for that email) or erasure (redacts name/email/description/note-and-reply text across *all* of that requester's tickets, and deletes their attachment files — irreversible, confirmed before it runs).
+- `/dashboard/tickets/new` — agent-initiated ticket creation, for a phone call or walk-in. Unlike the public form, priority and assignment can be set immediately instead of always going through round-robin. Optionally starts from a saved template (`/dashboard/templates`) that pre-fills category/subject/description.
+- `/dashboard/assets` — a small asset-management view: add/edit company equipment or software (name, tag, category, status, who has it, location, serial number, vendor, purchase date, warranty, notes), a CSV export, and see every ticket raised against one *and* a field-level change history (who changed what, and when) from its own page. Never hard-deleted, same philosophy as agents — retire it instead. Retired/Lost assets stop showing up as a pickable option (the request form, the ticket-linking dropdown) but stay reachable and editable. An asset within `WARRANTY_ALERT_DAYS` of its warranty expiring gets a badge on the list *and* a one-time email digest to every active agent (changing the warranty date lets it alert again later).
+- `/dashboard/kb` — write and publish/unpublish knowledge-base articles (see `/kb` above). Link one into a ticket note in one click from the note form.
 - `/dashboard/canned-responses` — a shared library of reusable note text any agent can insert into a note in one click.
 - `/dashboard/agents` — list of agents (active and deactivated) and a form to add new ones, plus deactivate/reactivate. All agents currently share one role — anyone logged in can manage any ticket and add other agents. Deactivating (never deleting, to keep their activity history intact) revokes login immediately, even for an already-open session, and excludes them from new assignments; you can't deactivate your own account or the last active agent.
+- `/dashboard/reports` — ticket volume for the last 30 days, time-to-first-response and time-to-resolution, and breakdowns by category, status, and current agent workload.
+- `/dashboard/settings` — editable aging thresholds (used for both the "Aging" badge and SLA emails, previously a hardcoded constant), plus links to:
+  - `/dashboard/settings/webhooks` — POST a signed JSON payload (HMAC-SHA256 in an `X-Velv-Signature` header) to any URL on `ticket.created` / `ticket.status_changed` / `ticket.assigned`.
+  - `/dashboard/settings/login-log` — every login attempt, successful or not, with IP and user agent — for spotting a compromised account.
+  - `/dashboard/settings/custom-fields` — a text field scoped to one category (e.g. "System name" only on Account & Access), shown on the public form, agent-initiated tickets, and the ticket detail page whenever that category's picked.
 
 `/healthz` (no login) reports `{"status":"ok"}` after a real DB connectivity check — for a host or uptime monitor to poll, not a browser.
+
+**Accessibility**: a "Skip to main content" link (visible on keyboard focus), `role="alert"`/`role="status"` on validation messages and banners so a screen reader announces them, and `scope="col"` on data table headers.
 
 ## Data
 
@@ -117,6 +127,23 @@ pm2 start ecosystem.config.js
 Put this behind a reverse proxy (nginx, Caddy, etc.) for HTTPS in production,
 and once it's served over HTTPS, set `COOKIE_SECURE=true` in `.env` so
 session cookies are only sent over encrypted connections.
+
+### Docker
+
+```bash
+docker build -t velv-ticketing .
+docker run -d \
+  -p 3000:3000 \
+  -v $(pwd)/data:/app/data \
+  -e SESSION_SECRET="$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")" \
+  velv-ticketing
+```
+
+`data/` (the database, attachments, backups) is a mounted volume, not baked
+into the image, so it survives a container recreate. `SESSION_SECRET` has no
+safe default — always pass a real one at run time, never bake one into the
+image. This hasn't been build-tested against a live Docker daemon in this
+environment; review the `Dockerfile` before relying on it in production.
 
 ## Testing
 

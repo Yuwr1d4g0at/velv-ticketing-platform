@@ -1,0 +1,38 @@
+<%- include('../partials/header') %>
+<h1>Login activity</h1>
+<p class="muted">The most recent 200 login attempts, successful or not - useful for spotting a compromised account or a brute-force run.</p>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">When</th>
+        <th scope="col">Email attempted</th>
+        <th scope="col">Result</th>
+        <th scope="col">IP address</th>
+        <th scope="col">User agent</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!entries.length) { %>
+        <tr><td colspan="5" class="empty-row">No login attempts recorded yet.</td></tr>
+      <% } %>
+      <% entries.forEach(function(e) { %>
+        <tr>
+          <td><%= e.created_at %></td>
+          <td><%= e.email %></td>
+          <td>
+            <% if (e.success) { %>
+              <span class="badge badge-status-resolved">Success<% if (e.agent_name) { %> &middot; <%= e.agent_name %><% } %></span>
+            <% } else { %>
+              <span class="badge badge-status-closed">Failed</span>
+            <% } %>
+          </td>
+          <td><% if (e.ip_address) { %><%= e.ip_address %><% } else { %>&mdash;<% } %></td>
+          <td class="overflow-wrap-anywhere"><% if (e.user_agent) { %><%= e.user_agent %><% } else { %>&mdash;<% } %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<%- include('../partials/footer') %>

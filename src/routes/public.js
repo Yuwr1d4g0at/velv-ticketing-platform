@@ -4,8 +4,11 @@ const rateLimit = require("express-rate-limit");
 const db = require("../db");
 const { CATEGORIES } = require("../constants");
 const { t } = require("../i18n");
-const { sendTicketCreatedEmail, sendAgentNotifiedOfReply } = require("../mailer");
+const { sendTicketCreatedEmail, sendAgentNotifiedOfReply, sendLowRatingEscalation } = require("../mailer");
+const { triggerWebhooks } = require("../webhooks");
 const assets = require("../assets");
+const kb = require("../kb");
+const customFields = require("../custom-fields");
 const {
   ATTACHMENTS_DIR,
   SAFE_PREVIEW_TYPES,
@@ -58,6 +61,7 @@ router.get("/", (req, res) => {
     title: t(req.lang, "submit_request_title"),
     categories: CATEGORIES,
     assets: assets.assignable(),
+    customFieldsByCategory: customFields.byCategory(),
     errors: [],
     values: {},
     uploadHint: LIMITS_HINT,
@@ -99,6 +103,7 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
       title: t(req.lang, "submit_request_title"),
       categories: CATEGORIES,
       assets: assets.assignable(),
+      customFieldsByCategory: customFields.byCategory(),
       errors,
       values,
       uploadHint: LIMITS_HINT,
@@ -147,6 +152,8 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
     ).run(result.lastInsertRowid, "Auto-assigned on creation.");
   }
 
+  customFields.saveSubmittedCustomFields(result.lastInsertRowid, category, req.body);
+
   saveAttachments({ ticketId: result.lastInsertRowid, files: req.files, uploadedBy: "requester" });
 
   // Fire-and-forget: email delivery (or a missing/misconfigured SMTP setup)
@@ -156,6 +163,13 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
     ticketId: result.lastInsertRowid,
     subject: subject.trim(),
   }).catch((err) => console.error("Could not send ticket-created email:", err.message));
+
+  triggerWebhooks("ticket.created", {
+    ticket_id: result.lastInsertRowid,
+    subject: subject.trim(),
+    category,
+    requester_email: requester_email.trim().toLowerCase(),
+  });
 
   res.redirect(`/confirmation/${result.lastInsertRowid}`);
 });
@@ -293,6 +307,20 @@ router.post("/status/reply", statusLimiter, (req, res) => {
       message: body,
     }).catch((err) => console.error("Could not send agent-notified-of-reply email:", err.message));
   }
+  // Watchers get the same nudge as the assignee - "keep me posted" without
+  // being the one it's actually assigned to.
+  const watchers = db
+    .prepare(
+      `SELECT agents.email FROM ticket_watchers
+       JOIN agents ON agents.id = ticket_watchers.agent_id
+       WHERE ticket_watchers.ticket_id = ? AND agents.id != ?`
+    )
+    .all(ticket.id, ticket.assigned_to || -1);
+  for (const watcher of watchers) {
+    sendAgentNotifiedOfReply({ to: watcher.email, ticketId: ticket.id, subject: ticket.subject, message: body }).catch((err) =>
+      console.error("Could not send watcher-notified-of-reply email:", err.message)
+    );
+  }
 
   const updated = db.prepare("SELECT * FROM tickets WHERE id = ?").get(ticket.id);
   res.render("public/status-check", {
@@ -353,6 +381,23 @@ router.get("/status/attachments/:attachmentId/preview", previewLimiter, (req, re
   res.sendFile(path.join(ATTACHMENTS_DIR, attachment.stored_name));
 });
 
+router.get("/kb", (req, res) => {
+  const { category = "", q = "" } = req.query;
+  res.render("public/kb-list", {
+    title: "Help center",
+    articles: kb.publishedList({ category, q }),
+    filters: { category, q },
+  });
+});
+
+router.get("/kb/:slug", (req, res) => {
+  const article = kb.getBySlug(req.params.slug);
+  if (!article) {
+    return res.status(404).render("error", { title: "Not found", message: "That article doesn't exist or isn't published." });
+  }
+  res.render("public/kb-article", { title: article.title, article });
+});
+
 // Reached via the link in the "ticket resolved" email, not a login - see the
 // ticket_ratings comment in src/db/index.js for the trust model this token
 // represents (a bearer capability to rate this one ticket, nothing more).
@@ -409,6 +454,18 @@ router.post("/rate/:token", statusLimiter, (req, res) => {
     rating,
     comment || null
   );
+
+  // A 1-2 star rating just sitting in the database is easy to miss - flag
+  // it to the whole active team the moment it comes in, the same "no
+  // single natural recipient" reasoning as the warranty digest.
+  if (rating <= 2) {
+    const activeAgents = db.prepare("SELECT email FROM agents WHERE active = 1").all();
+    for (const agent of activeAgents) {
+      sendLowRatingEscalation({ to: agent.email, ticketId: ticket.id, subject: ticket.subject, rating, comment }).catch(
+        (err) => console.error("Could not send low-rating escalation email:", err.message)
+      );
+    }
+  }
 
   res.render("public/rate", { title: "Rate your experience", ticket, alreadyRated: true, error: null });
 });

@@ -120,12 +120,16 @@ function update(id, fields, agentId = null) {
     if (existing) return { error: `Asset tag "${values.asset_tag}" is already in use.` };
   }
 
+  // A changed warranty date (renewed, or a data-entry fix) should be able to
+  // alert again - same idea as a reopened ticket clearing sla_alerted_at.
+  const warrantyChanged = before && (before.warranty_expires || null) !== (values.warranty_expires || null);
+
   db.prepare(
     `UPDATE assets SET
        name = @name, asset_tag = @asset_tag, category = @category, status = @status,
        assigned_to_name = @assigned_to_name, location = @location, serial_number = @serial_number,
        vendor = @vendor, purchase_date = @purchase_date, warranty_expires = @warranty_expires,
-       notes = @notes, updated_at = datetime('now')
+       notes = @notes, updated_at = datetime('now')${warrantyChanged ? ", warranty_alerted_at = NULL" : ""}
      WHERE id = @id`
   ).run({ ...values, id });
 

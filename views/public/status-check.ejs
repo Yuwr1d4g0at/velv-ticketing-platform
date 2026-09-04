@@ -6,7 +6,7 @@
     <p class="muted"><%= t('check_status_intro') %></p>
 
     <% if (error) { %>
-      <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
+      <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
     <% } %>
 
     <form action="/status" method="POST" class="stacked-form">
@@ -30,7 +30,7 @@
           <dt><%= t('category') %></dt><dd><%= categoryLabel(ticket.category) %></dd>
           <dt><%= t('priority') %></dt><dd><%= ticket.priority %></dd>
           <dt><%= t('status') %></dt><dd><span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span></dd>
-          <dt><%= t('description') %></dt><dd><%= ticket.description %></dd>
+          <dt><%= t('description') %></dt><dd class="preserve-newlines"><%- renderRichText(ticket.description) %></dd>
           <dt><%= t('submitted') %></dt><dd><%= ticket.created_at %></dd>
           <dt><%= t('last_updated') %></dt><dd><%= ticket.updated_at %></dd>
         </dl>
@@ -68,7 +68,7 @@
                 <strong><%= a.type === 'requester_reply' ? t('you') : (a.agent_name || 'Velv Helpdesk') %></strong>
                 &middot; <%= a.created_at %>
               </div>
-              <div class="activity-body preserve-newlines"><%= a.body %></div>
+              <div class="activity-body preserve-newlines"><%- renderRichText(a.body) %></div>
             </li>
           <% }) %>
         </ul>

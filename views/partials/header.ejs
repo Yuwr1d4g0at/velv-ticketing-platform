@@ -11,6 +11,7 @@
   <script src="/js/theme-init.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <header class="site-header">
     <div class="site-header-inner">
       <a class="brand" href="<%= typeof currentAgent !== 'undefined' && currentAgent ? '/dashboard' : '/' %>">
@@ -25,6 +26,9 @@
             <a href="/dashboard/assets">Assets</a>
             <a href="/dashboard/agents">Agents</a>
             <a href="/dashboard/canned-responses">Responses</a>
+            <a href="/dashboard/kb">Knowledge base</a>
+            <a href="/dashboard/reports">Reports</a>
+            <a href="/dashboard/settings">Settings</a>
             <span class="nav-user">Signed in as <%= currentAgent.name %></span>
             <form action="/logout" method="POST" class="inline-form">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -33,6 +37,7 @@
           <% } else { %>
             <a href="/"><%= t('nav_submit_request') %></a>
             <a href="/status"><%= t('nav_check_status') %></a>
+            <a href="/kb">Help center</a>
             <a href="/login" class="nav-cta"><%= t('nav_helpdesk_login') %></a>
           <% } %>
         </nav>
@@ -54,4 +59,4 @@
       </div>
     </div>
   </header>
-  <main class="page">
+  <main class="page" id="main-content">

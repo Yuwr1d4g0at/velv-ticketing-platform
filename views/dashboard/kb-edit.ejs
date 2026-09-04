@@ -1,0 +1,41 @@
+<%- include('../partials/header') %>
+<div class="card card-wide">
+  <h1><%= article && article.id ? 'Edit article' : 'New article' %></h1>
+  <% if (article && article.slug) { %>
+    <p class="muted">Public at <a href="/kb/<%= article.slug %>" target="_blank" rel="noopener">/kb/<%= article.slug %></a></p>
+  <% } %>
+
+  <% if (error) { %>
+    <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+  <% } %>
+
+  <form action="<%= article && article.id ? `/dashboard/kb/${article.id}/edit` : '/dashboard/kb/new' %>" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+    <label for="title">Title</label>
+    <input type="text" id="title" name="title" required maxlength="200" value="<%= (article && article.title) || '' %>">
+
+    <label for="category">Category (optional)</label>
+    <select id="category" name="category">
+      <option value="">No specific category</option>
+      <% categories.forEach(function(c) { %>
+        <option value="<%= c %>" <%= article && article.category === c ? 'selected' : '' %>><%= c %></option>
+      <% }) %>
+    </select>
+
+    <label for="body">Body</label>
+    <textarea id="body" name="body" rows="14" required maxlength="20000"><%= (article && article.body) || '' %></textarea>
+    <p class="field-hint">Plain text, shown as written - no formatting yet.</p>
+
+    <% if (article && article.id) { %>
+      <label class="checkbox-label">
+        <input type="checkbox" name="published" value="1" <%= article.published ? 'checked' : '' %>>
+        Published (visible on the public help center)
+      </label>
+    <% } %>
+
+    <button type="submit" class="button-primary"><%= article && article.id ? 'Save changes' : 'Create article' %></button>
+  </form>
+</div>
+<p><a href="/dashboard/kb">&larr; Back to all articles</a></p>
+<%- include('../partials/footer') %>

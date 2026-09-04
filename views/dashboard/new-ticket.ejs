@@ -1,0 +1,103 @@
+<%- include('../partials/header') %>
+<div class="card card-wide">
+  <h1>New ticket</h1>
+  <p class="muted">For a phone call or walk-in - fills out the request on the requester's behalf.</p>
+
+  <% if (errors && errors.length) { %>
+    <div class="alert alert-error" role="alert">
+      <span class="icon icon-alert-triangle"></span>
+      <ul>
+        <% errors.forEach(function(err) { %><li><%= err %></li><% }) %>
+      </ul>
+    </div>
+  <% } %>
+
+  <% if (templates.length) { %>
+    <form action="/dashboard/tickets/new" method="GET" class="filter-bar">
+      <select name="template">
+        <option value="">Start from a template&hellip;</option>
+        <% templates.forEach(function(t) { %><option value="<%= t.id %>"><%= t.name %></option><% }) %>
+      </select>
+      <button type="submit" class="button-secondary">Load</button>
+      <a href="/dashboard/templates" class="button-secondary button-ghost">Manage templates</a>
+    </form>
+  <% } else { %>
+    <p><a href="/dashboard/templates">Set up a ticket template</a> to speed up common recurring requests.</p>
+  <% } %>
+
+  <form action="/dashboard/tickets/new" method="POST" class="stacked-form split-layout" enctype="multipart/form-data">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <div class="split-layout-aside">
+      <p class="split-legend">Requester</p>
+
+      <label for="requester_name">Name</label>
+      <input type="text" id="requester_name" name="requester_name" value="<%= values.requester_name || '' %>" required maxlength="200">
+
+      <label for="requester_email">Email</label>
+      <input type="email" id="requester_email" name="requester_email" value="<%= values.requester_email || '' %>" required maxlength="200">
+
+      <label for="category">Category</label>
+      <select id="category" name="category" required>
+        <option value="" disabled <%= !values.category ? 'selected' : '' %>>Choose one&hellip;</option>
+        <% categories.forEach(function(c) { %>
+          <option value="<%= c %>" <%= values.category === c ? 'selected' : '' %>><%= c %></option>
+        <% }) %>
+      </select>
+
+      <% if (assets.length) { %>
+        <label for="asset_id">Related asset (optional)</label>
+        <select id="asset_id" name="asset_id">
+          <option value="">Not asset-specific</option>
+          <% assets.forEach(function(a) { %>
+            <option value="<%= a.id %>" <%= String(values.asset_id) === String(a.id) ? 'selected' : '' %>>
+              <% if (a.asset_tag) { %><%= a.asset_tag %><% } else { %>Asset #<%= a.id %><% } %>
+            </option>
+          <% }) %>
+        </select>
+      <% } %>
+
+      <label for="priority">Priority</label>
+      <select id="priority" name="priority">
+        <% priorities.forEach(function(p) { %>
+          <option value="<%= p %>" <%= (values.priority || 'Medium') === p ? 'selected' : '' %>><%= p %></option>
+        <% }) %>
+      </select>
+
+      <label for="assigned_to">Assign to</label>
+      <select id="assigned_to" name="assigned_to">
+        <option value="">Unassigned</option>
+        <% agents.forEach(function(a) { %>
+          <option value="<%= a.id %>" <%= String(values.assigned_to) === String(a.id) ? 'selected' : '' %>><%= a.name %></option>
+        <% }) %>
+      </select>
+
+      <% Object.keys(customFieldsByCategory).forEach(function(cat) { %>
+        <div data-custom-fields="<%= cat %>" <%= values.category === cat ? '' : 'hidden' %>>
+          <% customFieldsByCategory[cat].forEach(function(f) { %>
+            <label for="custom_<%= f.id %>"><%= f.field_name %></label>
+            <input type="text" id="custom_<%= f.id %>" name="custom_<%= f.id %>" maxlength="500">
+          <% }) %>
+        </div>
+      <% }) %>
+    </div>
+
+    <div class="split-layout-main">
+      <p class="split-legend">What's going on</p>
+
+      <label for="subject">Subject</label>
+      <input type="text" id="subject" name="subject" value="<%= values.subject || '' %>" required maxlength="200">
+
+      <label for="description">Description</label>
+      <textarea id="description" name="description" rows="8" required maxlength="5000"><%= values.description || '' %></textarea>
+
+      <label for="attachments">Attachments</label>
+      <input type="file" id="attachments" name="attachments" multiple data-dropzone accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.csv">
+      <p class="field-hint"><%= uploadHint %></p>
+    </div>
+
+    <div class="split-layout-actions">
+      <button type="submit" class="button-primary">Create ticket</button>
+    </div>
+  </form>
+</div>
+<%- include('../partials/footer') %>

@@ -177,15 +177,28 @@ test("dashboard shows an average resolution time once a ticket has been resolved
   assert.match(html, /Avg\. time to resolve/);
 });
 
+// The exact business-hours boundary math (does crossing Urgent's threshold
+// but not Medium's actually change the outcome) is covered deterministically
+// in test/aging.test.js, with fixed dates rather than "N days ago from
+// whenever this suite happens to run" - a real calendar span's business-
+// hours content depends on which weekday it lands on, so a wall-clock-
+// relative offset chosen to sit *exactly* between two thresholds would be
+// flaky here. This test only checks the plumbing end to end through a real
+// HTTP request: does changing priority, then aging well past any
+// threshold, actually surface the badge on the rendered page.
 test("aging threshold depends on priority", async () => {
   const id = await createTicket("Priority aging test", "aging-requester@example.com");
   const ticketPage = await client.get(`/dashboard/tickets/${id}`);
   const csrf = extractCsrf(await ticketPage.text());
   await client.postForm(`/dashboard/tickets/${id}/priority`, { priority: "Urgent", _csrf: csrf });
 
+  const freshRes = await client.get(`/dashboard/tickets/${id}`);
+  assert.doesNotMatch(await freshRes.text(), /badge-aging/);
+
   const db = new DatabaseSync(app.dbPath);
-  // 2 days old: past the Urgent threshold (1 day) but under Medium's (5).
-  db.prepare("UPDATE tickets SET created_at = datetime('now', '-2 days') WHERE id = ?").run(Number(id));
+  // Unambiguously past every priority's threshold (even Low's 7 days),
+  // regardless of weekday alignment - not trying to hit an exact boundary.
+  db.prepare("UPDATE tickets SET created_at = datetime('now', '-30 days') WHERE id = ?").run(Number(id));
   db.close();
 
   const res = await client.get(`/dashboard/tickets/${id}`);

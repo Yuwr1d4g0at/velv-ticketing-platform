@@ -1,0 +1,20 @@
+<%- include('../partials/header') %>
+<h1>Settings</h1>
+<p class="muted">Also see <a href="/dashboard/settings/webhooks">Webhooks</a>, <a href="/dashboard/settings/login-log">Login activity</a>, and <a href="/dashboard/settings/custom-fields">Custom fields</a>.</p>
+
+<div class="card card-medium">
+  <h2>Aging thresholds</h2>
+  <p class="muted">A still-open ticket older than this, for its priority, gets flagged "Aging" on the dashboard and triggers an SLA breach email (if notifications are configured).</p>
+  <% if (error) { %>
+    <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+  <% } %>
+  <form action="/dashboard/settings" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <% priorities.forEach(function(p) { %>
+      <label for="days_<%= p %>"><%= p %> (days)</label>
+      <input type="number" id="days_<%= p %>" name="days_<%= p %>" min="1" max="365" required value="<%= thresholds[p] %>">
+    <% }) %>
+    <button type="submit" class="button-primary">Save thresholds</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

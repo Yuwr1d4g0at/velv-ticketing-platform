@@ -99,6 +99,29 @@ function sendAgentNotifiedOfReply({ to, ticketId, subject, message }) {
   );
 }
 
+// @mentioned in a note - see src/mentions.js for how the mention itself is
+// parsed out of the note body.
+function sendMentionEmail({ to, ticketId, subject, mentionedBy, message }) {
+  return send(
+    to,
+    `${mentionedBy} mentioned you on ticket #${ticketId}`,
+    `${mentionedBy} mentioned you in a note on ticket #${ticketId} ("${subject}"):\n\n${message}`
+  );
+}
+
+// A 1-2 star rating just came in - flagged to the whole active team so a
+// bad experience doesn't quietly go unnoticed (see the /rate/:token route).
+function sendLowRatingEscalation({ to, ticketId, subject, rating, comment }) {
+  return send(
+    to,
+    `Low satisfaction rating (${rating}/5) on ticket #${ticketId}`,
+    `Ticket #${ticketId} ("${subject}") just got a ${rating}-star rating.\n\n` +
+      (comment ? `Their comment:\n${comment}\n\n` : "") +
+      `${APP_URL ? `${APP_URL}/dashboard/tickets/${ticketId}` : "Check the dashboard"} for details.\n\n` +
+      `Our Team. Remotely Yours.\nVelv`
+  );
+}
+
 // Proactive nudge for whoever's assigned once a ticket crosses its priority-
 // scaled aging threshold - see src/sla.js for when this actually fires.
 function sendSlaBreachEmail({ to, ticketId, subject, priority, ageDays }) {
@@ -111,6 +134,21 @@ function sendSlaBreachEmail({ to, ticketId, subject, priority, ageDays }) {
   );
 }
 
+// One digest per agent listing every asset that just entered its
+// warranty-expiry window, rather than a separate email per asset - see
+// src/warranty.js for when this fires.
+function sendWarrantyExpiryDigest({ to, assets }) {
+  const lines = assets
+    .map((a) => `- ${a.name}${a.asset_tag ? ` (${a.asset_tag})` : ""}: warranty expires ${a.warranty_expires}`)
+    .join("\n");
+  return send(
+    to,
+    `Warranty expiring soon: ${assets.length} asset${assets.length === 1 ? "" : "s"}`,
+    `${lines}\n\n${APP_URL ? `${APP_URL}/dashboard/assets` : "Check the dashboard"} for details.\n\n` +
+      `Our Team. Remotely Yours.\nVelv`
+  );
+}
+
 module.exports = {
   enabled,
   sendTicketCreatedEmail,
@@ -119,4 +157,7 @@ module.exports = {
   sendReplyEmail,
   sendAgentNotifiedOfReply,
   sendSlaBreachEmail,
+  sendMentionEmail,
+  sendLowRatingEscalation,
+  sendWarrantyExpiryDigest,
 };

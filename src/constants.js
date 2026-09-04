@@ -2,11 +2,10 @@ const CATEGORIES = ["Hardware", "Software", "Network", "Account & Access", "Othe
 const PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 const STATUSES = ["Open", "In Progress", "Resolved", "Closed"];
 
-// A still-open ticket (Open or In Progress) older than this gets an "Aging"
-// flag on the dashboard, so nothing quietly falls through the cracks. Scaled
-// by priority - an Urgent ticket sitting for 2 days is worse than a Low one
-// sitting for 5, so they shouldn't share one flat threshold.
-const AGING_DAYS_BY_PRIORITY = { Urgent: 1, High: 2, Medium: 5, Low: 7 };
+// Aging thresholds by priority live in the sla_thresholds table now (see
+// src/aging.js) - editable from /dashboard/settings, no longer a hardcoded
+// constant. The historical defaults it's seeded with on first boot are in
+// src/db/index.js's DEFAULT_SLA_DAYS, right next to the seeding logic.
 
 // Tickets per dashboard page.
 const PAGE_SIZE = 25;
@@ -18,7 +17,6 @@ module.exports = {
   CATEGORIES,
   PRIORITIES,
   STATUSES,
-  AGING_DAYS_BY_PRIORITY,
   PAGE_SIZE,
   ASSET_CATEGORIES,
   ASSET_STATUSES,

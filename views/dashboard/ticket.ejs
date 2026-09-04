@@ -1,9 +1,9 @@
 <%- include('../partials/header') %>
 <% if (mergedFrom) { %>
-  <div class="alert alert-info"><span class="icon icon-alert-triangle"></span>Ticket #<%= mergedFrom %> was merged into this one - its activity and attachments now appear below.</div>
+  <div class="alert alert-info" role="status"><span class="icon icon-alert-triangle"></span>Ticket #<%= mergedFrom %> was merged into this one - its activity and attachments now appear below.</div>
 <% } %>
 <% if (ticket.data_erased_at) { %>
-  <div class="alert alert-info"><span class="icon icon-alert-triangle"></span>This requester's data was erased on <%= ticket.data_erased_at %> per a GDPR request. Name, email, and free-text content below have been redacted.</div>
+  <div class="alert alert-info" role="status"><span class="icon icon-alert-triangle"></span>This requester's data was erased on <%= ticket.data_erased_at %> per a GDPR request. Name, email, and free-text content below have been redacted.</div>
 <% } %>
 <div class="ticket-head">
   <div>
@@ -16,8 +16,16 @@
     <% if (aging) { %><span class="badge badge-aging">Aging</span><% } %>
     <span class="badge badge-priority-<%= ticket.priority.toLowerCase() %>"><%= ticket.priority %></span>
     <span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span>
+    <form action="/dashboard/tickets/<%= ticket.id %>/<%= isWatching ? 'unwatch' : 'watch' %>" method="POST" class="inline-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button type="submit" class="button-secondary"><%= isWatching ? 'Stop watching' : 'Watch' %></button>
+    </form>
   </div>
 </div>
+
+<% if (watchers.length) { %>
+  <p class="muted">Watched by <%= watchers.map(function(w) { return w.name; }).join(', ') %></p>
+<% } %>
 
 <div class="tag-row">
   <% tags.forEach(function(t) { %>
@@ -43,11 +51,21 @@
   <div class="ticket-main">
     <div class="card">
       <h2>Description</h2>
-      <p class="preserve-newlines"><%= ticket.description %></p>
+      <p class="preserve-newlines"><%- renderRichText(ticket.description) %></p>
       <p class="muted">Category: <%= ticket.category %></p>
+      <% if (customFieldValues.length) { %>
+        <dl class="def-list">
+          <% customFieldValues.forEach(function(f) { %>
+            <dt><%= f.field_name %></dt><dd><%= f.value %></dd>
+          <% }) %>
+        </dl>
+      <% } %>
 
       <% if (rating) { %>
         <h2>Satisfaction rating</h2>
+        <% if (rating.rating <= 2) { %>
+          <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span>Low satisfaction rating - worth a follow-up.</div>
+        <% } %>
         <p class="rating-stars" aria-label="<%= rating.rating %> out of 5 stars">
           <% for (let i = 1; i <= 5; i++) { %><span class="icon icon-star <%= i <= rating.rating ? 'is-filled' : '' %>"></span><% } %>
         </p>
@@ -89,7 +107,7 @@
               &middot; <%= a.created_at %>
               <% if (a.type === 'reply' || a.type === 'requester_reply') { %><span class="badge badge-visible-to-requester">Visible to requester</span><% } %>
             </div>
-            <div class="activity-body <%= ['note', 'reply', 'requester_reply'].includes(a.type) ? '' : 'muted' %>"><%= a.body %></div>
+            <div class="activity-body <%= ['note', 'reply', 'requester_reply'].includes(a.type) ? '' : 'muted' %>"><%- renderRichText(a.body) %></div>
           </li>
         <% }) %>
       </ul>
@@ -106,8 +124,19 @@
           </select>
         <% } %>
 
+        <% if (kbArticles.length) { %>
+          <label for="kb-select">Link a help article</label>
+          <select id="kb-select" data-target="body">
+            <option value="">Choose one&hellip;</option>
+            <% kbArticles.forEach(function(a) { %>
+              <option value="<%= a.url %>"><%= a.title %></option>
+            <% }) %>
+          </select>
+        <% } %>
+
         <label for="body">Add a note</label>
         <textarea id="body" name="body" rows="3" maxlength="5000" placeholder="Internal note, visible to helpdesk staff only"></textarea>
+        <p class="field-hint">**bold**, *italic*, and [links](https://example.com) are supported. Mention a colleague with @firstnamelastname (e.g. @janedoe) to email them.</p>
 
         <label class="checkbox-label">
           <input type="checkbox" name="visibility" value="reply">
@@ -115,7 +144,7 @@
         </label>
 
         <label for="note-attachments">Attach a file</label>
-        <input type="file" id="note-attachments" name="attachments" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.csv">
+        <input type="file" id="note-attachments" name="attachments" multiple data-dropzone accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.csv">
         <p class="field-hint"><%= uploadHint %></p>
 
         <button type="submit" class="button-primary">Add note</button>
@@ -186,6 +215,25 @@
       </form>
     </div>
 
+    <% if (possibleDuplicates.length) { %>
+      <div class="card">
+        <h2>Possible duplicates</h2>
+        <p class="muted">Other open tickets with a similar subject.</p>
+        <ul class="requester-history">
+          <% possibleDuplicates.forEach(function(d) { %>
+            <li>
+              <a href="/dashboard/tickets/<%= d.id %>">#<%= d.id %> &middot; <%= d.subject %></a>
+              <form action="/dashboard/tickets/<%= ticket.id %>/merge" method="POST" class="inline-form" data-confirm="Merge this ticket into #<%= d.id %>? Its activity, attachments, and tags will move over, and this ticket will close.">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <input type="hidden" name="target_ticket_id" value="<%= d.id %>">
+                <button type="submit" class="link-button">Merge into this</button>
+              </form>
+            </li>
+          <% }) %>
+        </ul>
+      </div>
+    <% } %>
+
     <div class="card">
       <h2>Merge</h2>
       <p class="muted">Fold this ticket into another one - its activity, attachments, and tags all move over, and this ticket closes and redirects here.</p>
@@ -239,5 +287,8 @@
   </div>
 </div>
 
-<p><a href="/dashboard">&larr; Back to all tickets</a></p>
+<p>
+  <a href="/dashboard">&larr; Back to all tickets</a>
+  &middot; <a href="/dashboard/tickets/<%= ticket.id %>/print" target="_blank" rel="noopener">Print / Save as PDF</a>
+</p>
 <%- include('../partials/footer') %>

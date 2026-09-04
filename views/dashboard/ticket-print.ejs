@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ticket #<%= ticket.id %> · Velv Ticketing</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="print-page">
+    <div class="print-toolbar no-print">
+      <button type="button" id="print-button" class="button-primary">Print / Save as PDF</button>
+      <a href="/dashboard/tickets/<%= ticket.id %>" class="button-secondary">&larr; Back to ticket</a>
+    </div>
+
+    <h1>#<%= ticket.id %> &middot; <%= ticket.subject %></h1>
+    <p class="muted">
+      From <%= ticket.requester_name %> (<%= ticket.requester_email %>) &middot; opened <%= ticket.created_at %>
+    </p>
+    <dl class="def-list">
+      <dt>Category</dt><dd><%= ticket.category %></dd>
+      <dt>Priority</dt><dd><%= ticket.priority %></dd>
+      <dt>Status</dt><dd><%= ticket.status %></dd>
+      <% if (asset) { %><dt>Asset</dt><dd><%= asset.name %><% if (asset.asset_tag) { %> (<%= asset.asset_tag %>)<% } %></dd><% } %>
+      <dt>Last updated</dt><dd><%= ticket.updated_at %></dd>
+    </dl>
+
+    <h2>Description</h2>
+    <p class="preserve-newlines"><%- renderRichText(ticket.description) %></p>
+
+    <h2>Activity</h2>
+    <ul class="print-activity">
+      <% if (!activity.length) { %>
+        <li class="muted">No activity.</li>
+      <% } %>
+      <% activity.forEach(function(a) { %>
+        <li>
+          <strong><%= a.type === 'requester_reply' ? ticket.requester_name : (a.agent_name || 'System') %></strong>
+          &middot; <%= a.created_at %>
+          <div class="preserve-newlines"><%- renderRichText(a.body) %></div>
+        </li>
+      <% }) %>
+    </ul>
+  </div>
+  <script src="/js/print-button.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+<%- include('../partials/header') %>
+<div class="card card-wide">
+  <h1>Help center</h1>
+  <p class="muted">Answers to common questions - if you can't find what you need, <a href="/">submit a request</a> instead.</p>
+
+  <form action="/kb" method="GET" class="filter-bar">
+    <input type="text" name="q" placeholder="Search articles&hellip;" value="<%= filters.q %>">
+    <button type="submit" class="button-secondary">Search</button>
+    <% if (filters.q || filters.category) { %><a href="/kb" class="button-secondary button-ghost">Reset</a><% } %>
+  </form>
+
+  <% if (!articles.length) { %>
+    <p class="muted">No articles match your search.</p>
+  <% } else { %>
+    <ul class="requester-history">
+      <% articles.forEach(function(a) { %>
+        <li>
+          <a href="/kb/<%= a.slug %>"><%= a.title %></a>
+          <% if (a.category) { %><span class="badge badge-status-open"><%= a.category %></span><% } %>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</div>
+<%- include('../partials/footer') %>

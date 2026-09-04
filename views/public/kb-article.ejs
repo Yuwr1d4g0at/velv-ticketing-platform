@@ -1,0 +1,8 @@
+<%- include('../partials/header') %>
+<div class="card card-wide">
+  <p><a href="/kb">&larr; Help center</a></p>
+  <h1><%= article.title %></h1>
+  <% if (article.category) { %><span class="badge badge-status-open"><%= article.category %></span><% } %>
+  <p class="preserve-newlines"><%= article.body %></p>
+</div>
+<%- include('../partials/footer') %>

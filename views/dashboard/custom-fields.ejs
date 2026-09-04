@@ -1,0 +1,53 @@
+<%- include('../partials/header') %>
+<h1>Custom fields</h1>
+<p class="muted">A field scoped to one category only - shown on the public form, agent-initiated tickets, and the ticket detail page whenever that category's selected.</p>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">Category</th>
+        <th scope="col">Field name</th>
+        <th scope="col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!definitions.length) { %>
+        <tr><td colspan="3" class="empty-row">No custom fields yet.</td></tr>
+      <% } %>
+      <% definitions.forEach(function(d) { %>
+        <tr>
+          <td><%= d.category %></td>
+          <td><%= d.field_name %></td>
+          <td>
+            <form action="/dashboard/settings/custom-fields/<%= d.id %>/delete" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button">Delete</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card card-medium">
+  <h2>Add a field</h2>
+  <% if (error) { %>
+    <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+  <% } %>
+  <form action="/dashboard/settings/custom-fields" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label for="category">Category</label>
+    <select id="category" name="category" required>
+      <option value="" disabled selected>Choose one&hellip;</option>
+      <% categories.forEach(function(c) { %><option value="<%= c %>"><%= c %></option><% }) %>
+    </select>
+
+    <label for="field_name">Field name</label>
+    <input type="text" id="field_name" name="field_name" required maxlength="100" placeholder="System name">
+
+    <button type="submit" class="button-primary">Add field</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

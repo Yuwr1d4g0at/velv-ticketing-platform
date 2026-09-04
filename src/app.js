@@ -11,6 +11,7 @@ const { attachAgent } = require("./middleware/auth");
 const { csrfToken } = require("./middleware/csrf");
 const { attachLang } = require("./middleware/lang");
 const { LANGUAGES } = require("./i18n");
+const { renderRichText } = require("./richtext");
 const publicRoutes = require("./routes/public");
 const authRoutes = require("./routes/auth");
 const dashboardRoutes = require("./routes/dashboard");
@@ -77,6 +78,15 @@ app.get("/healthz", (req, res) => {
 app.use(attachAgent(db));
 app.use(csrfToken);
 app.use(attachLang);
+// Available in every view as renderRichText(text) - used with <%- %> (raw
+// output) specifically for ticket descriptions and note/reply bodies, the
+// only two places rich text applies. See src/richtext.js for why that's
+// safe: it escapes first, so <%- %> here is never rendering un-sanitized
+// user input directly.
+app.use((req, res, next) => {
+  res.locals.renderRichText = renderRichText;
+  next();
+});
 
 // Sets the language cookie and bounces back where the visitor came from - a
 // plain link-based toggle (see the header partial), not JS-driven, since

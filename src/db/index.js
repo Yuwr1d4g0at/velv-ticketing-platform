@@ -191,7 +191,110 @@ db.exec(`
     INSERT INTO tickets_fts(tickets_fts, rowid, subject, description) VALUES ('delete', old.id, old.subject, old.description);
     INSERT INTO tickets_fts(rowid, subject, description) VALUES (new.id, new.subject, new.description);
   END;
+
+  -- Editable aging thresholds (was a hardcoded constant - see src/aging.js).
+  -- One row per priority; seeded below if empty, never left without a row
+  -- for a known priority.
+  CREATE TABLE IF NOT EXISTS sla_thresholds (
+    priority TEXT PRIMARY KEY,
+    days     INTEGER NOT NULL
+  );
+
+  -- Outbound event notifications. events is a comma-separated list of the
+  -- fixed WEBHOOK_EVENTS (src/webhooks.js) this URL is subscribed to.
+  -- secret signs each payload (HMAC-SHA256, in an X-Velv-Signature header)
+  -- so the receiving end can verify it actually came from here.
+  CREATE TABLE IF NOT EXISTS webhooks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    url        TEXT NOT NULL,
+    events     TEXT NOT NULL,
+    secret     TEXT NOT NULL,
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Every login attempt, successful or not - for noticing a compromised
+  -- account or a brute-force run, not just the rate limiter blocking it in
+  -- the moment. agent_id is nullable (a failed attempt with a bogus email
+  -- has no agent to point at) and ON DELETE SET NULL for the same reason as
+  -- everywhere else an agent is referenced - the log entry outlives the
+  -- account either way.
+  CREATE TABLE IF NOT EXISTS login_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    email      TEXT NOT NULL,
+    agent_id   INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+    success    INTEGER NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_login_log_created_at ON login_log(created_at);
+
+  -- Public, published-by-default help articles. Never hard-deleted in the
+  -- UI's normal path (see src/kb.js) - same "retire, don't destroy"
+  -- philosophy as agents/assets, though there's no history/audit reason
+  -- here, just consistency of habit.
+  CREATE TABLE IF NOT EXISTS kb_articles (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    title      TEXT NOT NULL,
+    slug       TEXT NOT NULL UNIQUE,
+    body       TEXT NOT NULL,
+    category   TEXT,
+    published  INTEGER NOT NULL DEFAULT 1,
+    agent_id   INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Reusable starting points for agent-initiated tickets (src/routes/
+  -- dashboard.js's /tickets/new) - not the public form, which is one
+  -- person's own words about their own problem.
+  CREATE TABLE IF NOT EXISTS ticket_templates (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    category    TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    description TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- An agent who wants updates on a ticket without being its assignee.
+  CREATE TABLE IF NOT EXISTS ticket_watchers (
+    ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    agent_id  INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    PRIMARY KEY (ticket_id, agent_id)
+  );
+
+  -- Field definitions scoped to one category (e.g. a "System name" field
+  -- that only makes sense on Account & Access tickets). Text-only for now -
+  -- see src/custom-fields.js for why. Never surfaced for tickets created
+  -- before a field existed, which is exactly what a plain LEFT JOIN against
+  -- ticket_custom_values already gives for free.
+  CREATE TABLE IF NOT EXISTS custom_field_definitions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    category   TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS ticket_custom_values (
+    ticket_id             INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    field_definition_id   INTEGER NOT NULL REFERENCES custom_field_definitions(id) ON DELETE CASCADE,
+    value                 TEXT,
+    PRIMARY KEY (ticket_id, field_definition_id)
+  );
 `);
+
+// sla_thresholds starts empty on a fresh database (CREATE TABLE doesn't seed
+// rows) - fill in the historical defaults the very first time, so aging.js
+// always finds a row for every known priority.
+const DEFAULT_SLA_DAYS = { Urgent: 1, High: 2, Medium: 5, Low: 7 };
+const slaThresholdCount = db.prepare("SELECT COUNT(*) AS c FROM sla_thresholds").get().c;
+if (slaThresholdCount === 0) {
+  const insertThreshold = db.prepare("INSERT INTO sla_thresholds (priority, days) VALUES (?, ?)");
+  for (const [priority, days] of Object.entries(DEFAULT_SLA_DAYS)) {
+    insertThreshold.run(priority, days);
+  }
+}
 
 // The triggers above only cover tickets created/edited from here on - a
 // database that already had tickets before FTS5 search was added needs a
@@ -318,6 +421,13 @@ if (!ticketColumns4.some((c) => c.name === "merged_into_id")) {
 const ticketColumns5 = db.prepare("PRAGMA table_info(tickets)").all();
 if (!ticketColumns5.some((c) => c.name === "data_erased_at")) {
   db.exec("ALTER TABLE tickets ADD COLUMN data_erased_at TEXT");
+}
+
+// Tenth migration: guarded ALTER TABLE for assets.warranty_alerted_at, same
+// idempotent-alert pattern as tickets.sla_alerted_at above.
+const assetColumns = db.prepare("PRAGMA table_info(assets)").all();
+if (!assetColumns.some((c) => c.name === "warranty_alerted_at")) {
+  db.exec("ALTER TABLE assets ADD COLUMN warranty_alerted_at TEXT");
 }
 
 module.exports = db;
