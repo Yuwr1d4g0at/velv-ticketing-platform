@@ -6,8 +6,10 @@ if (!process.env.SESSION_SECRET) {
 }
 
 const app = require("./app");
-const { checkSlaBreaches } = require("./sla");
+const { checkSlaBreaches, checkFirstResponseBreaches } = require("./sla");
 const { checkWarrantyAlerts } = require("./warranty");
+const { runDueRecurringTickets } = require("./recurring");
+const { sendDueDigests } = require("./digest");
 const PORT = process.env.PORT || 3000;
 const SLA_CHECK_INTERVAL_MINUTES = parseInt(process.env.SLA_CHECK_INTERVAL_MINUTES, 10) || 15;
 
@@ -17,13 +19,18 @@ app.listen(PORT, () => {
 
 // Runs in-process rather than as a separate cron job (like scripts/backup.js)
 // since SLA checks need to run every few minutes, not daily - simplest to
-// just keep the same long-lived process ticking. Warranty checks don't need
-// that frequency (a warranty date barely ever changes minute to minute), but
-// piggybacking on the same interval is cheap and avoids a second timer for
-// no real benefit. Both run once at startup, then on the interval.
+// just keep the same long-lived process ticking. Warranty checks, recurring
+// tickets, and the daily digest don't need that frequency, but piggybacking
+// on the same interval is cheap and avoids extra timers for no real benefit -
+// each of those three is internally guarded to actually act at most once
+// whenever its own real-world cadence (a date, a day) says to. All run once
+// at startup, then on the interval.
 function runPeriodicChecks() {
   checkSlaBreaches();
+  checkFirstResponseBreaches();
   checkWarrantyAlerts();
+  runDueRecurringTickets();
+  sendDueDigests();
 }
 runPeriodicChecks();
 setInterval(runPeriodicChecks, SLA_CHECK_INTERVAL_MINUTES * 60 * 1000);

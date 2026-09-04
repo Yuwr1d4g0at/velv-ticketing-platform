@@ -52,7 +52,7 @@
     <div class="card">
       <h2>Description</h2>
       <p class="preserve-newlines"><%- renderRichText(ticket.description) %></p>
-      <p class="muted">Category: <%= ticket.category %></p>
+      <p class="muted">Category: <%= ticket.category %><% if (ticket.subcategory) { %> &rsaquo; <%= ticket.subcategory %><% } %></p>
       <% if (customFieldValues.length) { %>
         <dl class="def-list">
           <% customFieldValues.forEach(function(f) { %>
@@ -233,6 +233,31 @@
         </ul>
       </div>
     <% } %>
+
+    <div class="card">
+      <h2>Related tickets</h2>
+      <p class="muted">Link a genuinely separate ticket that's still connected to this one, without merging them.</p>
+      <% if (linkedTickets.length) { %>
+        <ul class="requester-history">
+          <% linkedTickets.forEach(function(l) { %>
+            <li>
+              <a href="/dashboard/tickets/<%= l.id %>">#<%= l.id %> &middot; <%= l.subject %></a>
+              <span class="badge badge-status-<%= l.status.replace(/\s+/g, '-').toLowerCase() %>"><%= l.status %></span>
+              <form action="/dashboard/tickets/<%= ticket.id %>/link/<%= l.id %>/remove" method="POST" class="inline-form">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button type="submit" class="link-button">Unlink</button>
+              </form>
+            </li>
+          <% }) %>
+        </ul>
+      <% } %>
+      <form action="/dashboard/tickets/<%= ticket.id %>/link" method="POST" class="stacked-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <label for="linked_ticket_id">Link ticket #</label>
+        <input type="number" id="linked_ticket_id" name="linked_ticket_id" min="1" required>
+        <button type="submit" class="button-secondary">Link</button>
+      </form>
+    </div>
 
     <div class="card">
       <h2>Merge</h2>

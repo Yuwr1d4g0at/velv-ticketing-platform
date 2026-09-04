@@ -1,6 +1,8 @@
 const CATEGORIES = ["Hardware", "Software", "Network", "Account & Access", "Other"];
 const PRIORITIES = ["Low", "Medium", "High", "Urgent"];
-const STATUSES = ["Open", "In Progress", "Resolved", "Closed"];
+// "Waiting on Customer" pauses the aging/SLA clock for as long as a ticket
+// sits in it - see src/aging.js's paused_hours accounting.
+const STATUSES = ["Open", "In Progress", "Waiting on Customer", "Resolved", "Closed"];
 
 // Aging thresholds by priority live in the sla_thresholds table now (see
 // src/aging.js) - editable from /dashboard/settings, no longer a hardcoded

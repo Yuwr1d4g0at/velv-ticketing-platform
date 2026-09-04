@@ -134,6 +134,35 @@ function sendSlaBreachEmail({ to, ticketId, subject, priority, ageDays }) {
   );
 }
 
+// A separate, usually much tighter warning than sendSlaBreachEmail above -
+// nobody's touched this ticket at all yet, past its priority's
+// first-response target (see first_response_thresholds in src/db/index.js).
+function sendFirstResponseBreachEmail({ to, ticketId, subject, priority }) {
+  return send(
+    to,
+    `First-response warning: ticket #${ticketId} hasn't been touched yet (${priority})`,
+    `Ticket #${ticketId} ("${subject}") is ${priority} priority and still has no response - past its first-response target.\n\n` +
+      `${APP_URL ? `${APP_URL}/dashboard/tickets/${ticketId}` : "Check the dashboard"} for details.\n\n` +
+      `Our Team. Remotely Yours.\nVelv`
+  );
+}
+
+// One email per agent per day summarizing their own open queue - see
+// src/digest.js for when this fires and how "once per day" is enforced.
+// Skipped entirely (by the caller) for an agent with nothing open, so this
+// never has to handle an empty list gracefully.
+function sendDailyDigest({ to, openCount, agingCount, tickets }) {
+  const lines = tickets
+    .map((t) => `- #${t.id} (${t.priority}${t.is_aging ? ", aging" : ""}): ${t.subject}`)
+    .join("\n");
+  return send(
+    to,
+    `Your daily digest: ${openCount} open ticket${openCount === 1 ? "" : "s"}${agingCount ? `, ${agingCount} aging` : ""}`,
+    `${lines}\n\n${APP_URL ? `${APP_URL}/dashboard` : "Check the dashboard"} for details.\n\n` +
+      `Our Team. Remotely Yours.\nVelv`
+  );
+}
+
 // One digest per agent listing every asset that just entered its
 // warranty-expiry window, rather than a separate email per asset - see
 // src/warranty.js for when this fires.
@@ -157,6 +186,8 @@ module.exports = {
   sendReplyEmail,
   sendAgentNotifiedOfReply,
   sendSlaBreachEmail,
+  sendFirstResponseBreachEmail,
+  sendDailyDigest,
   sendMentionEmail,
   sendLowRatingEscalation,
   sendWarrantyExpiryDigest,

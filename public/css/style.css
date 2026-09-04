@@ -223,6 +223,7 @@ hr { border: none; border-top: 1px solid var(--border-subtle); margin: var(--spa
 .icon-sun { -webkit-mask-image: url("/icons/sun.svg"); mask-image: url("/icons/sun.svg"); }
 .icon-moon { -webkit-mask-image: url("/icons/moon.svg"); mask-image: url("/icons/moon.svg"); }
 .icon-download { -webkit-mask-image: url("/icons/download.svg"); mask-image: url("/icons/download.svg"); }
+.icon-bell { -webkit-mask-image: url("/icons/bell.svg"); mask-image: url("/icons/bell.svg"); }
 .icon-star { -webkit-mask-image: url("/icons/star.svg"); mask-image: url("/icons/star.svg"); }
 
 /* ============================================================
@@ -305,6 +306,67 @@ hr { border: none; border-top: 1px solid var(--border-subtle); margin: var(--spa
   font-size: var(--fs-body-sm);
   padding: var(--space-2) var(--space-3);
 }
+
+/* Notification bell - a <details>/<summary> pair so the dropdown itself
+   needs no JS at all; public/js/notifications-bell.js only listens for the
+   "toggle" event to mark everything read the moment it's opened. */
+.notif-bell { position: relative; }
+.notif-bell > summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--text-strong);
+}
+.notif-bell > summary::-webkit-details-marker { display: none; }
+.notif-bell > summary:hover { background: var(--velv-ink-100); }
+[data-theme="dark"] .notif-bell > summary:hover { background: rgba(255, 255, 255, 0.08); }
+.notif-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: var(--status-danger);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: var(--fw-medium);
+  padding: 3px 5px;
+  border-radius: var(--radius-pill);
+  min-width: 16px;
+  text-align: center;
+}
+.notif-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-2));
+  width: 320px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  z-index: 50;
+  padding: var(--space-2) 0;
+}
+.notif-item {
+  display: block;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  color: inherit;
+  text-decoration: none;
+  font-size: var(--fs-body-sm);
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: var(--velv-ink-100); text-decoration: none; }
+[data-theme="dark"] .notif-item:hover { background: rgba(255, 255, 255, 0.08); }
+.notif-item.is-unread { font-weight: var(--fw-medium); }
+.notif-item .notif-time { display: block; color: var(--text-muted); font-size: var(--fs-caption); margin-top: 2px; }
+.notif-empty { padding: var(--space-4); color: var(--text-muted); text-align: center; font-size: var(--fs-body-sm); }
 
 .link-button {
   background: none;
@@ -722,6 +784,7 @@ form.split-layout.stacked-form { display: grid; max-width: none; }
    uses off-black instead of literally copying that combination.) */
 .badge-status-open { background: var(--velv-purple-100); color: var(--velv-off-black); }
 .badge-status-in-progress { background: #FDF0D8; color: #8A5A00; }
+.badge-status-waiting-on-customer { background: #E3E8FD; color: #2B3A9E; }
 .badge-status-resolved { background: #D6F6E7; color: #067A45; }
 .badge-status-closed { background: var(--velv-ink-100); color: var(--velv-ink-700); }
 .badge-priority-low { background: var(--velv-ink-100); color: var(--velv-ink-700); }

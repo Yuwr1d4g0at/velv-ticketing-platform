@@ -81,7 +81,7 @@ test("CSV export returns a well-formed CSV with a header row", async () => {
   assert.match(res.headers.get("content-type"), /text\/csv/);
   const csv = await res.text();
   const lines = csv.trim().split("\r\n");
-  assert.equal(lines[0], "ID,Subject,Requester name,Requester email,Category,Priority,Status,Assigned to,Created,Updated");
+  assert.equal(lines[0], "ID,Subject,Requester name,Requester email,Category,Subcategory,Priority,Status,Assigned to,Created,Updated");
   assert.ok(lines.some((line) => line.includes("CSV export coverage ticket")));
 });
 

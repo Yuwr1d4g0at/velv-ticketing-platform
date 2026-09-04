@@ -16,13 +16,15 @@
 // public.js), so a ticket that breaches, gets fixed, and later reopens can
 // alert again rather than staying silenced forever.
 const db = require("./db");
-const { isAgingTicket } = require("./aging");
-const { sendSlaBreachEmail } = require("./mailer");
+const { isAgingTicket, agingHoursElapsed, currentFirstResponseThresholds, BUSINESS_HOURS_PER_DAY } = require("./aging");
+const { sendSlaBreachEmail, sendFirstResponseBreachEmail } = require("./mailer");
+const notifications = require("./notifications");
 
 function checkSlaBreaches() {
   const candidates = db
     .prepare(
-      `SELECT tickets.id, tickets.subject, tickets.priority, tickets.status, tickets.created_at, agents.email AS agent_email
+      `SELECT tickets.id, tickets.subject, tickets.priority, tickets.status, tickets.created_at,
+              tickets.waiting_since, tickets.paused_hours, agents.id AS agent_id, agents.email AS agent_email
        FROM tickets
        JOIN agents ON agents.id = tickets.assigned_to AND agents.active = 1
        WHERE tickets.status IN ('Open', 'In Progress') AND tickets.sla_alerted_at IS NULL`
@@ -31,7 +33,11 @@ function checkSlaBreaches() {
   const breaching = candidates.filter((t) => isAgingTicket(t));
 
   for (const ticket of breaching) {
-    const ageDays = (Date.now() - new Date(`${ticket.created_at.replace(" ", "T")}Z`).getTime()) / (1000 * 60 * 60 * 24);
+    // Business hours, not raw calendar hours - matches what actually
+    // crossed the threshold (and excludes any time spent paused waiting on
+    // the customer), rather than a wall-clock age that could read as "past
+    // due" much sooner than the business-hours math actually says.
+    const ageDays = agingHoursElapsed(ticket) / BUSINESS_HOURS_PER_DAY;
     sendSlaBreachEmail({
       to: ticket.agent_email,
       ticketId: ticket.id,
@@ -39,10 +45,53 @@ function checkSlaBreaches() {
       priority: ticket.priority,
       ageDays,
     }).catch((err) => console.error("Could not send SLA breach email:", err.message));
+    notifications.create(ticket.agent_id, "sla_breach", ticket.id, `Ticket #${ticket.id} is past its aging threshold (${ticket.priority}).`);
     db.prepare("UPDATE tickets SET sla_alerted_at = datetime('now') WHERE id = ?").run(ticket.id);
   }
 
   return breaching.length;
 }
 
-module.exports = { checkSlaBreaches };
+// Same idempotent-alert shape as checkSlaBreaches above, but for the
+// separate, usually much tighter, first-response target (see
+// first_response_thresholds in src/db/index.js). A ticket stops being a
+// candidate the moment any agent-authored activity exists on it at all
+// (note, reply, status/priority change, reassignment) - "first response"
+// doesn't require a public reply specifically, just evidence someone's
+// looked at it.
+function checkFirstResponseBreaches() {
+  const thresholds = currentFirstResponseThresholds();
+  const candidates = db
+    .prepare(
+      `SELECT tickets.id, tickets.subject, tickets.priority, tickets.status, tickets.created_at,
+              tickets.waiting_since, tickets.paused_hours, agents.id AS agent_id, agents.email AS agent_email
+       FROM tickets
+       JOIN agents ON agents.id = tickets.assigned_to AND agents.active = 1
+       WHERE tickets.status IN ('Open', 'In Progress')
+         AND tickets.first_response_alerted_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM ticket_activity WHERE ticket_id = tickets.id AND agent_id IS NOT NULL
+         )`
+    )
+    .all();
+
+  const breaching = candidates.filter((t) => {
+    const thresholdHours = thresholds[t.priority];
+    return thresholdHours != null && agingHoursElapsed(t) > thresholdHours;
+  });
+
+  for (const ticket of breaching) {
+    sendFirstResponseBreachEmail({
+      to: ticket.agent_email,
+      ticketId: ticket.id,
+      subject: ticket.subject,
+      priority: ticket.priority,
+    }).catch((err) => console.error("Could not send first-response breach email:", err.message));
+    notifications.create(ticket.agent_id, "first_response_breach", ticket.id, `Ticket #${ticket.id} still has no response (${ticket.priority}).`);
+    db.prepare("UPDATE tickets SET first_response_alerted_at = datetime('now') WHERE id = ?").run(ticket.id);
+  }
+
+  return breaching.length;
+}
+
+module.exports = { checkSlaBreaches, checkFirstResponseBreaches };

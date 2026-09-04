@@ -6,7 +6,13 @@ const db = require("../db");
 const { requireAgent } = require("../middleware/auth");
 const { verifyCsrf } = require("../middleware/csrf");
 const { CATEGORIES, PRIORITIES, STATUSES, ASSET_CATEGORIES, ASSET_STATUSES, PAGE_SIZE } = require("../constants");
-const { isAgingTicket, annotateAging, currentThresholds } = require("../aging");
+const {
+  isAgingTicket,
+  annotateAging,
+  currentThresholds,
+  currentFirstResponseThresholds,
+  businessHoursElapsed,
+} = require("../aging");
 const { sendStatusChangeEmail, sendResolvedEmail, sendReplyEmail, sendTicketCreatedEmail, sendMentionEmail } = require("../mailer");
 const { findMentionedAgents } = require("../mentions");
 const { toCsv } = require("../csv");
@@ -17,6 +23,9 @@ const { exportRequesterData, eraseRequesterData } = require("../privacy");
 const { WEBHOOK_EVENTS, generateSecret, triggerWebhooks } = require("../webhooks");
 const { WARRANTY_ALERT_DAYS } = require("../warranty");
 const kb = require("../kb");
+const recurring = require("../recurring");
+const automation = require("../automation");
+const notifications = require("../notifications");
 const customFields = require("../custom-fields");
 const {
   ATTACHMENTS_DIR,
@@ -35,6 +44,23 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 router.use(requireAgent);
 
+// Makes the notification bell's contents available to the header partial on
+// every dashboard page, not just a dedicated notifications route.
+router.use((req, res, next) => {
+  res.locals.notifUnreadCount = notifications.unreadCount(req.session.agentId);
+  res.locals.notifRecent = notifications.recentFor(req.session.agentId);
+  next();
+});
+
+// Called by public/js/notifications-bell.js the moment the bell dropdown is
+// opened - marks everything read at once rather than needing a per-item
+// click, since the dropdown already shows the most recent ones regardless
+// of read state (see notifications.recentFor).
+router.post("/notifications/mark-all-read", verifyCsrf, (req, res) => {
+  notifications.markAllRead(req.session.agentId);
+  res.status(204).end();
+});
+
 function getTicketOr404(res, id) {
   const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
   if (!ticket) {
@@ -42,6 +68,17 @@ function getTicketOr404(res, id) {
     return null;
   }
   return ticket;
+}
+
+// A flat, cross-category suggestion list for the subcategory field's
+// datalist - same helper as in public.js, duplicated rather than shared
+// since it's a one-line query (matches how EMAIL_RE is handled the same way
+// across both route files).
+function subcategorySuggestions() {
+  return db
+    .prepare("SELECT DISTINCT subcategory FROM tickets WHERE subcategory IS NOT NULL AND subcategory != '' ORDER BY subcategory LIMIT 100")
+    .all()
+    .map((r) => r.subcategory);
 }
 
 // Turns free-text search input into a safe FTS5 MATCH expression. Each
@@ -198,7 +235,7 @@ router.get("/", (req, res) => {
     LEFT JOIN agents ON agents.id = tickets.assigned_to
     ${where}
     ORDER BY
-      CASE tickets.status WHEN 'Open' THEN 0 WHEN 'In Progress' THEN 1 WHEN 'Resolved' THEN 2 ELSE 3 END,
+      CASE tickets.status WHEN 'Open' THEN 0 WHEN 'In Progress' THEN 1 WHEN 'Waiting on Customer' THEN 2 WHEN 'Resolved' THEN 3 ELSE 4 END,
       CASE tickets.priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,
       tickets.created_at DESC
     LIMIT ? OFFSET ?
@@ -286,6 +323,7 @@ router.get("/export.csv", (req, res) => {
     { key: "requester_name", header: "Requester name" },
     { key: "requester_email", header: "Requester email" },
     { key: "category", header: "Category" },
+    { key: "subcategory", header: "Subcategory" },
     { key: "priority", header: "Priority" },
     { key: "status", header: "Status" },
     { key: "assigned_name", header: "Assigned to" },
@@ -322,6 +360,7 @@ router.get("/tickets/new", (req, res) => {
     agents: db.prepare("SELECT id, name FROM agents WHERE active = 1 ORDER BY name").all(),
     templates: db.prepare("SELECT id, name FROM ticket_templates ORDER BY name").all(),
     customFieldsByCategory: customFields.byCategory(),
+    subcategorySuggestions: subcategorySuggestions(),
     errors: [],
     values,
     uploadHint: LIMITS_HINT,
@@ -333,6 +372,7 @@ router.post("/tickets/new", handleUpload("attachments"), verifyCsrf, (req, res) 
     requester_name = "",
     requester_email = "",
     category = "",
+    subcategory = "",
     subject = "",
     description = "",
     priority = "Medium",
@@ -340,7 +380,7 @@ router.post("/tickets/new", handleUpload("attachments"), verifyCsrf, (req, res) 
     assigned_to = "",
   } = req.body;
 
-  const values = { requester_name, requester_email, category, subject, description, priority, asset_id, assigned_to };
+  const values = { requester_name, requester_email, category, subcategory, subject, description, priority, asset_id, assigned_to };
   const errors = [];
   const rerender = () => {
     deleteUploadedFiles(req.files);
@@ -352,6 +392,7 @@ router.post("/tickets/new", handleUpload("attachments"), verifyCsrf, (req, res) 
       agents: db.prepare("SELECT id, name FROM agents WHERE active = 1 ORDER BY name").all(),
       templates: db.prepare("SELECT id, name FROM ticket_templates ORDER BY name").all(),
       customFieldsByCategory: customFields.byCategory(),
+      subcategorySuggestions: subcategorySuggestions(),
       errors,
       values,
       uploadHint: LIMITS_HINT,
@@ -375,13 +416,14 @@ router.post("/tickets/new", handleUpload("attachments"), verifyCsrf, (req, res) 
 
   const result = db
     .prepare(
-      `INSERT INTO tickets (subject, description, category, priority, requester_name, requester_email, assigned_to, asset_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tickets (subject, description, category, subcategory, priority, requester_name, requester_email, assigned_to, asset_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       subject.trim(),
       description.trim(),
       category,
+      subcategory.trim().slice(0, 100) || null,
       priority,
       requester_name.trim(),
       requester_email.trim().toLowerCase(),
@@ -476,6 +518,15 @@ router.get("/tickets/:id", (req, res) => {
         )
         .all(ticket.requester_email, ticket.id);
 
+  const linkedTickets = db
+    .prepare(
+      `SELECT tickets.id, tickets.subject, tickets.status FROM ticket_links
+       JOIN tickets ON tickets.id = ticket_links.linked_ticket_id
+       WHERE ticket_links.ticket_id = ?
+       ORDER BY tickets.created_at DESC`
+    )
+    .all(ticket.id);
+
   res.render("dashboard/ticket", {
     title: `Ticket #${ticket.id}`,
     ticket,
@@ -488,6 +539,7 @@ router.get("/tickets/:id", (req, res) => {
     cannedResponses: canned.all(),
     rating,
     otherTickets,
+    linkedTickets,
     asset: ticket.asset_id ? assets.get(ticket.asset_id) : null,
     assignableAssets: assets.assignable(),
     statuses: STATUSES,
@@ -586,6 +638,37 @@ router.post("/tickets/:id/merge", verifyCsrf, (req, res) => {
   }
 
   res.redirect(`/dashboard/tickets/${target.id}`);
+});
+
+// Manually link two genuinely separate tickets that are still connected
+// somehow - as opposed to /merge above, which is for actual duplicates.
+// Stored symmetrically (see src/db/index.js's ticket_links comment) so
+// either ticket's own page shows the link without an OR-across-both-columns
+// query.
+router.post("/tickets/:id/link", verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(res, req.params.id);
+  if (!ticket) return;
+
+  const otherId = parseInt(req.body.linked_ticket_id, 10);
+  if (!otherId || otherId === ticket.id) {
+    return res.status(400).render("error", { title: "Invalid link", message: "Enter a different, valid ticket number to link to." });
+  }
+  const other = getTicketOr404(res, otherId);
+  if (!other) return;
+
+  db.prepare("INSERT OR IGNORE INTO ticket_links (ticket_id, linked_ticket_id) VALUES (?, ?)").run(ticket.id, other.id);
+  db.prepare("INSERT OR IGNORE INTO ticket_links (ticket_id, linked_ticket_id) VALUES (?, ?)").run(other.id, ticket.id);
+  res.redirect(`/dashboard/tickets/${ticket.id}`);
+});
+
+router.post("/tickets/:id/link/:linkedId/remove", verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(res, req.params.id);
+  if (!ticket) return;
+
+  const otherId = parseInt(req.params.linkedId, 10);
+  db.prepare("DELETE FROM ticket_links WHERE ticket_id = ? AND linked_ticket_id = ?").run(ticket.id, otherId);
+  db.prepare("DELETE FROM ticket_links WHERE ticket_id = ? AND linked_ticket_id = ?").run(otherId, ticket.id);
+  res.redirect(`/dashboard/tickets/${ticket.id}`);
 });
 
 // Agent-side inline preview for a safe image attachment - never PDF/TXT/CSV,
@@ -689,9 +772,25 @@ function applyStatusChange(ticket, status, agentId) {
   // fixed, and later reopens should be able to alert again rather than
   // staying silenced forever because it alerted once in a previous life.
   const reopening = ["Open", "In Progress"].includes(status) && ["Resolved", "Closed"].includes(ticket.status);
+
+  // Aging-pause bookkeeping for "Waiting on Customer" (see src/aging.js):
+  // entering it stamps waiting_since; leaving it folds the business hours
+  // elapsed since then into paused_hours so that stretch is never counted
+  // against the team's own aging/SLA clock, however many times a ticket
+  // goes in and out of waiting over its lifetime.
+  let pauseSql = "";
+  const pauseParams = [];
+  if (status === "Waiting on Customer") {
+    pauseSql = ", waiting_since = datetime('now')";
+  } else if (ticket.status === "Waiting on Customer" && ticket.waiting_since) {
+    const waitingSince = new Date(`${ticket.waiting_since.replace(" ", "T")}Z`);
+    pauseSql = ", waiting_since = NULL, paused_hours = paused_hours + ?";
+    pauseParams.push(businessHoursElapsed(waitingSince, new Date()));
+  }
+
   db.prepare(
-    `UPDATE tickets SET status = ?, updated_at = datetime('now')${reopening ? ", sla_alerted_at = NULL" : ""} WHERE id = ?`
-  ).run(status, ticket.id);
+    `UPDATE tickets SET status = ?, updated_at = datetime('now')${reopening ? ", sla_alerted_at = NULL" : ""}${pauseSql} WHERE id = ?`
+  ).run(status, ...pauseParams, ticket.id);
   db.prepare(
     `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'status_change', ?)`
   ).run(ticket.id, agentId, `Status changed from "${ticket.status}" to "${status}".`);
@@ -836,6 +935,28 @@ router.post("/bulk/assign", verifyCsrf, (req, res) => {
   bulkRedirect(req, res);
 });
 
+// Adds (or removes) one tag across every selected ticket in one go, reusing
+// the same addTagToTicket/removeTagFromTicket helpers the single-ticket tag
+// form already uses - so case-insensitive reuse and the tag catalog stay
+// consistent whichever way a tag gets applied.
+router.post("/bulk/tag", verifyCsrf, (req, res) => {
+  const ids = parseTicketIds(req.body);
+  const name = (req.body.tag_name || "").trim();
+  if (ids.length && name) {
+    for (const id of ids) {
+      if (db.prepare("SELECT 1 FROM tickets WHERE id = ?").get(id)) {
+        if (req.body.tag_action === "remove") {
+          const tag = db.prepare("SELECT id FROM tags WHERE name = ? COLLATE NOCASE").get(name);
+          if (tag) removeTagFromTicket(id, tag.id);
+        } else {
+          addTagToTicket(id, name);
+        }
+      }
+    }
+  }
+  bulkRedirect(req, res);
+});
+
 router.post("/tickets/:id/note", handleUpload("attachments"), verifyCsrf, (req, res) => {
   const ticket = getTicketOr404(res, req.params.id);
   if (!ticket) return;
@@ -877,6 +998,7 @@ router.post("/tickets/:id/note", handleUpload("attachments"), verifyCsrf, (req, 
         mentionedBy: author ? author.name : "Someone",
         message: body,
       }).catch((err) => console.error("Could not send mention email:", err.message));
+      notifications.create(mentioned.id, "mention", ticket.id, `${author ? author.name : "Someone"} mentioned you on ticket #${ticket.id}.`);
     }
   }
   if (hasFiles) {
@@ -943,6 +1065,41 @@ router.post("/templates", verifyCsrf, (req, res) => {
 router.post("/templates/:id/delete", verifyCsrf, (req, res) => {
   db.prepare("DELETE FROM ticket_templates WHERE id = ?").run(req.params.id);
   res.redirect("/dashboard/templates");
+});
+
+router.get("/recurring", (req, res) => {
+  res.render("dashboard/recurring", {
+    title: "Recurring tickets",
+    recurring: recurring.all(),
+    categories: CATEGORIES,
+    priorities: PRIORITIES,
+    error: null,
+  });
+});
+
+router.post("/recurring", verifyCsrf, (req, res) => {
+  const result = recurring.create(req.body);
+  if (result.error) {
+    return res.status(400).render("dashboard/recurring", {
+      title: "Recurring tickets",
+      recurring: recurring.all(),
+      categories: CATEGORIES,
+      priorities: PRIORITIES,
+      error: result.error,
+    });
+  }
+  res.redirect("/dashboard/recurring");
+});
+
+router.post("/recurring/:id/toggle", verifyCsrf, (req, res) => {
+  const row = db.prepare("SELECT active FROM recurring_tickets WHERE id = ?").get(req.params.id);
+  if (row) recurring.setActive(req.params.id, !row.active);
+  res.redirect("/dashboard/recurring");
+});
+
+router.post("/recurring/:id/delete", verifyCsrf, (req, res) => {
+  db.prepare("DELETE FROM recurring_tickets WHERE id = ?").run(req.params.id);
+  res.redirect("/dashboard/recurring");
 });
 
 router.get("/kb", (req, res) => {
@@ -1161,6 +1318,62 @@ router.get("/reports", (req, res) => {
 
   const { resolutionTime, firstResponseTime } = ticketTimingStats();
 
+  // CSAT trend by month - only months with at least one rating, rather than
+  // zero-filling like the volume chart above: a rating scale of 1-5 has no
+  // sensible "0" to zero-fill with, since that would look identical to a
+  // genuinely bad average rather than "nobody rated anything that month".
+  const csatTrend = db
+    .prepare(
+      `SELECT strftime('%Y-%m', created_at) AS month, AVG(rating) AS avg_rating, COUNT(*) AS count
+       FROM ticket_ratings GROUP BY month ORDER BY month`
+    )
+    .all()
+    .map((r) => ({ ...r, barClass: barClass("bar-h", r.avg_rating, 5) }));
+
+  // Per-agent breakdown: how many of their tickets are currently
+  // resolved/closed, how long those took on average, and their average
+  // CSAT across whichever of their tickets got rated - a fuller picture
+  // than the "current open workload" byAgent table above.
+  const agentPerformance = db
+    .prepare(
+      `SELECT agents.name,
+              COUNT(DISTINCT resolved.ticket_id) AS resolved_count,
+              AVG(julianday(resolved.happened) - julianday(tickets.created_at)) AS avg_resolution_days,
+              AVG(ticket_ratings.rating) AS avg_csat
+       FROM agents
+       LEFT JOIN tickets ON tickets.assigned_to = agents.id
+       LEFT JOIN (
+         SELECT ticket_id, MAX(created_at) AS happened
+         FROM ticket_activity
+         WHERE type = 'status_change' AND body LIKE '%to "Resolved".'
+         GROUP BY ticket_id
+       ) resolved ON resolved.ticket_id = tickets.id
+       LEFT JOIN ticket_ratings ON ticket_ratings.ticket_id = tickets.id
+       WHERE agents.active = 1
+       GROUP BY agents.id
+       ORDER BY resolved_count DESC`
+    )
+    .all();
+
+  // Reopen rate: of tickets ever resolved, how many were later reopened
+  // (either an agent manually moving it back, or the auto-reopen-on-
+  // requester-reply in public.js - both leave a status_change activity row
+  // reading "from Resolved/Closed to ...") - a rough proxy for "are we
+  // actually fixing things" that isn't visible anywhere else today.
+  const everResolvedCount = db
+    .prepare(
+      `SELECT COUNT(DISTINCT ticket_id) AS c FROM ticket_activity
+       WHERE type = 'status_change' AND body LIKE '%to "Resolved".'`
+    )
+    .get().c;
+  const reopenedCount = db
+    .prepare(
+      `SELECT COUNT(DISTINCT ticket_id) AS c FROM ticket_activity
+       WHERE type = 'status_change' AND (body LIKE '%from "Resolved" to%' OR body LIKE '%from "Closed" to%')`
+    )
+    .get().c;
+  const reopenRate = everResolvedCount ? (reopenedCount / everResolvedCount) * 100 : null;
+
   res.render("dashboard/reports", {
     title: "Reports",
     volume: volume.map((v) => ({ ...v, barClass: barClass("bar-h", v.count, volumeMax) })),
@@ -1169,6 +1382,11 @@ router.get("/reports", (req, res) => {
     byAgent: withBarClass(byAgent, "bar-w"),
     resolutionTime,
     firstResponseTime,
+    csatTrend,
+    agentPerformance,
+    everResolvedCount,
+    reopenedCount,
+    reopenRate,
   });
 });
 
@@ -1176,6 +1394,7 @@ router.get("/settings", (req, res) => {
   res.render("dashboard/settings", {
     title: "Settings",
     thresholds: currentThresholds(),
+    frThresholds: currentFirstResponseThresholds(),
     priorities: PRIORITIES,
     error: null,
   });
@@ -1193,10 +1412,21 @@ router.post("/settings", verifyCsrf, (req, res) => {
     parsed[priority] = days;
   }
 
+  const parsedFr = {};
+  for (const priority of PRIORITIES) {
+    const hours = parseInt(req.body[`fr_hours_${priority}`], 10);
+    if (!Number.isInteger(hours) || hours < 1 || hours > 720) {
+      errors.push(`${priority}'s first-response target must be a whole number of hours between 1 and 720.`);
+      continue;
+    }
+    parsedFr[priority] = hours;
+  }
+
   if (errors.length) {
     return res.status(400).render("dashboard/settings", {
       title: "Settings",
       thresholds: currentThresholds(),
+      frThresholds: currentFirstResponseThresholds(),
       priorities: PRIORITIES,
       error: errors.join(" "),
     });
@@ -1204,6 +1434,8 @@ router.post("/settings", verifyCsrf, (req, res) => {
 
   const update = db.prepare("UPDATE sla_thresholds SET days = ? WHERE priority = ?");
   for (const [priority, days] of Object.entries(parsed)) update.run(days, priority);
+  const updateFr = db.prepare("UPDATE first_response_thresholds SET hours = ? WHERE priority = ?");
+  for (const [priority, hours] of Object.entries(parsedFr)) updateFr.run(hours, priority);
   res.redirect("/dashboard/settings");
 });
 
@@ -1241,6 +1473,43 @@ router.post("/settings/custom-fields", verifyCsrf, (req, res) => {
 router.post("/settings/custom-fields/:id/delete", verifyCsrf, (req, res) => {
   customFields.remove(req.params.id);
   res.redirect("/dashboard/settings/custom-fields");
+});
+
+router.get("/settings/automation", (req, res) => {
+  res.render("dashboard/automation", {
+    title: "Automation rules",
+    rules: automation.all(),
+    categories: CATEGORIES,
+    priorities: PRIORITIES,
+    agents: db.prepare("SELECT id, name FROM agents WHERE active = 1 ORDER BY name").all(),
+    error: null,
+  });
+});
+
+router.post("/settings/automation", verifyCsrf, (req, res) => {
+  const result = automation.create(req.body);
+  if (result.error) {
+    return res.status(400).render("dashboard/automation", {
+      title: "Automation rules",
+      rules: automation.all(),
+      categories: CATEGORIES,
+      priorities: PRIORITIES,
+      agents: db.prepare("SELECT id, name FROM agents WHERE active = 1 ORDER BY name").all(),
+      error: result.error,
+    });
+  }
+  res.redirect("/dashboard/settings/automation");
+});
+
+router.post("/settings/automation/:id/toggle", verifyCsrf, (req, res) => {
+  const row = db.prepare("SELECT active FROM automation_rules WHERE id = ?").get(req.params.id);
+  if (row) automation.setActive(req.params.id, !row.active);
+  res.redirect("/dashboard/settings/automation");
+});
+
+router.post("/settings/automation/:id/delete", verifyCsrf, (req, res) => {
+  automation.remove(req.params.id);
+  res.redirect("/dashboard/settings/automation");
 });
 
 router.get("/settings/webhooks", (req, res) => {

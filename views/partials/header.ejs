@@ -29,6 +29,26 @@
             <a href="/dashboard/kb">Knowledge base</a>
             <a href="/dashboard/reports">Reports</a>
             <a href="/dashboard/settings">Settings</a>
+            <details class="notif-bell" data-csrf="<%= csrfToken %>">
+              <summary aria-label="Notifications">
+                <span class="icon icon-bell"></span>
+                <% if (typeof notifUnreadCount !== 'undefined' && notifUnreadCount > 0) { %>
+                  <span class="notif-badge"><%= notifUnreadCount > 99 ? '99+' : notifUnreadCount %></span>
+                <% } %>
+              </summary>
+              <div class="notif-dropdown">
+                <% if (typeof notifRecent === 'undefined' || !notifRecent.length) { %>
+                  <p class="notif-empty">No notifications yet.</p>
+                <% } else { %>
+                  <% notifRecent.forEach(function(n) { %>
+                    <a class="notif-item <%= n.read_at ? '' : 'is-unread' %>" href="<%= n.ticket_id ? '/dashboard/tickets/' + n.ticket_id : '/dashboard' %>">
+                      <%= n.message %>
+                      <span class="notif-time"><%= n.created_at %></span>
+                    </a>
+                  <% }) %>
+                <% } %>
+              </div>
+            </details>
             <span class="nav-user">Signed in as <%= currentAgent.name %></span>
             <form action="/logout" method="POST" class="inline-form">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">

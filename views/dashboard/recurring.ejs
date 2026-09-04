@@ -1,0 +1,77 @@
+<%- include('../partials/header') %>
+<h1>Recurring tickets</h1>
+<p class="muted">Auto-creates a new ticket on a fixed schedule (e.g. "monthly server check") instead of someone remembering to file it by hand.</p>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Category</th>
+        <th scope="col">Every</th>
+        <th scope="col">Next run</th>
+        <th scope="col">Status</th>
+        <th scope="col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!recurring.length) { %>
+        <tr><td colspan="6" class="empty-row">No recurring tickets set up yet.</td></tr>
+      <% } %>
+      <% recurring.forEach(function(r) { %>
+        <tr class="<%= r.active ? '' : 'row-inactive' %>">
+          <td><%= r.name %></td>
+          <td><%= r.category %></td>
+          <td><%= r.interval_days %> day<%= r.interval_days === 1 ? '' : 's' %></td>
+          <td><%= r.next_run_at %></td>
+          <td><span class="badge <%= r.active ? 'badge-status-open' : '' %>"><%= r.active ? 'Active' : 'Paused' %></span></td>
+          <td>
+            <form action="/dashboard/recurring/<%= r.id %>/toggle" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button"><%= r.active ? 'Pause' : 'Resume' %></button>
+            </form>
+            <form action="/dashboard/recurring/<%= r.id %>/delete" method="POST" class="inline-form" data-confirm="Delete the recurring task &quot;<%= r.name %>&quot;? This can't be undone.">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button">Delete</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card card-medium">
+  <h2>Add a recurring ticket</h2>
+  <% if (error) { %>
+    <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+  <% } %>
+  <form action="/dashboard/recurring" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" required maxlength="200" placeholder="Monthly server check">
+
+    <label for="category">Category</label>
+    <select id="category" name="category" required>
+      <option value="" disabled selected>Choose one&hellip;</option>
+      <% categories.forEach(function(c) { %><option value="<%= c %>"><%= c %></option><% }) %>
+    </select>
+
+    <label for="priority">Priority</label>
+    <select id="priority" name="priority">
+      <% priorities.forEach(function(p) { %><option value="<%= p %>" <%= p === 'Medium' ? 'selected' : '' %>><%= p %></option><% }) %>
+    </select>
+
+    <label for="subject">Subject</label>
+    <input type="text" id="subject" name="subject" required maxlength="200" placeholder="Monthly server maintenance check">
+
+    <label for="description">Description</label>
+    <textarea id="description" name="description" rows="5" required maxlength="5000"></textarea>
+
+    <label for="interval_days">Repeat every (days)</label>
+    <input type="number" id="interval_days" name="interval_days" min="1" required value="30">
+
+    <button type="submit" class="button-primary">Add recurring ticket</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

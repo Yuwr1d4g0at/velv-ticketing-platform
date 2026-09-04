@@ -282,6 +282,75 @@ db.exec(`
     value                 TEXT,
     PRIMARY KEY (ticket_id, field_definition_id)
   );
+
+  -- Manually-linked related tickets (genuinely separate issues that are
+  -- still connected somehow), as opposed to /merge which is for actual
+  -- duplicates. Stored symmetrically - creating a link inserts both
+  -- (a, b) and (b, a) - so either ticket's own page can find it with a
+  -- plain "WHERE ticket_id = ?" instead of an OR across both columns.
+  CREATE TABLE IF NOT EXISTS ticket_links (
+    ticket_id        INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    linked_ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (ticket_id, linked_ticket_id)
+  );
+
+  -- Simple condition/action automation, evaluated once at ticket creation
+  -- (public form and agent-initiated alike) - see src/automation.js. Plain
+  -- columns rather than a JSON blob, matching this schema's style
+  -- elsewhere and keeping rules readable straight out of the table.
+  -- Conditions are AND'ed together when both are set; every non-null
+  -- action is applied when a rule matches.
+  CREATE TABLE IF NOT EXISTS automation_rules (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    name               TEXT NOT NULL,
+    condition_category TEXT,
+    condition_keyword  TEXT,
+    action_tag         TEXT,
+    action_priority    TEXT,
+    action_assigned_to INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+    active             INTEGER NOT NULL DEFAULT 1,
+    created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Templates that spawn a new ticket on a fixed cadence (e.g. "monthly
+  -- server check") instead of someone remembering to file it by hand - see
+  -- src/recurring.js. next_run_at advances by interval_days each time it fires.
+  CREATE TABLE IF NOT EXISTS recurring_tickets (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    category      TEXT NOT NULL,
+    subject       TEXT NOT NULL,
+    description   TEXT NOT NULL,
+    priority      TEXT NOT NULL DEFAULT 'Medium',
+    interval_days INTEGER NOT NULL,
+    next_run_at   TEXT NOT NULL,
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- In-app notifications (header bell), a lighter-weight alternative to
+  -- email for the same events (mention, assignment, reply, low rating) -
+  -- see src/notifications.js. read_at NULL means unread.
+  CREATE TABLE IF NOT EXISTS notifications (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id   INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    ticket_id  INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    read_at    TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_notifications_agent_id ON notifications(agent_id);
+
+  -- Same editable-threshold pattern as sla_thresholds, but for time-to-
+  -- first-response instead of overall resolution - a distinct, usually much
+  -- tighter, expectation ("acknowledge within 4 hours" vs "resolve within
+  -- 2 days"). Hours, not days, since first response is a shorter time scale.
+  CREATE TABLE IF NOT EXISTS first_response_thresholds (
+    priority TEXT PRIMARY KEY,
+    hours    INTEGER NOT NULL
+  );
 `);
 
 // sla_thresholds starts empty on a fresh database (CREATE TABLE doesn't seed
@@ -293,6 +362,16 @@ if (slaThresholdCount === 0) {
   const insertThreshold = db.prepare("INSERT INTO sla_thresholds (priority, days) VALUES (?, ?)");
   for (const [priority, days] of Object.entries(DEFAULT_SLA_DAYS)) {
     insertThreshold.run(priority, days);
+  }
+}
+
+// Same seed-if-empty pattern as sla_thresholds above, for first_response_thresholds.
+const DEFAULT_FIRST_RESPONSE_HOURS = { Urgent: 1, High: 4, Medium: 8, Low: 24 };
+const firstResponseThresholdCount = db.prepare("SELECT COUNT(*) AS c FROM first_response_thresholds").get().c;
+if (firstResponseThresholdCount === 0) {
+  const insertFrThreshold = db.prepare("INSERT INTO first_response_thresholds (priority, hours) VALUES (?, ?)");
+  for (const [priority, hours] of Object.entries(DEFAULT_FIRST_RESPONSE_HOURS)) {
+    insertFrThreshold.run(priority, hours);
   }
 }
 
@@ -428,6 +507,46 @@ if (!ticketColumns5.some((c) => c.name === "data_erased_at")) {
 const assetColumns = db.prepare("PRAGMA table_info(assets)").all();
 if (!assetColumns.some((c) => c.name === "warranty_alerted_at")) {
   db.exec("ALTER TABLE assets ADD COLUMN warranty_alerted_at TEXT");
+}
+
+// Eleventh migration: guarded ALTER TABLE for tickets.subcategory - an
+// optional, freeform second-level category (e.g. Hardware > Printer),
+// nullable so every ticket created before this still reads fine with none.
+const ticketColumns6 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns6.some((c) => c.name === "subcategory")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN subcategory TEXT");
+}
+
+// Twelfth migration: guarded ALTER TABLE for the "Waiting on Customer"
+// status's aging-pause bookkeeping (see src/aging.js). waiting_since is set
+// the moment a ticket enters that status and cleared the moment it leaves;
+// paused_hours accumulates the business hours spent waiting across however
+// many times a ticket has been paused, so time spent waiting on the
+// requester never counts against the team's own aging/SLA clock.
+const ticketColumns7 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns7.some((c) => c.name === "waiting_since")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN waiting_since TEXT");
+}
+const ticketColumns8 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns8.some((c) => c.name === "paused_hours")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN paused_hours REAL NOT NULL DEFAULT 0");
+}
+
+// Thirteenth migration: guarded ALTER TABLE for tickets.first_response_alerted_at,
+// the same idempotent-alert pattern as sla_alerted_at, but for the separate
+// first-response threshold (see first_response_thresholds above and
+// src/sla.js). Cleared on reopen alongside sla_alerted_at.
+const ticketColumns9 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns9.some((c) => c.name === "first_response_alerted_at")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN first_response_alerted_at TEXT");
+}
+
+// Fourteenth migration: guarded ALTER TABLE for agents.last_digest_at - the
+// daily digest email (src/digest.js) checks this to send at most once per
+// calendar day per agent, regardless of how often the periodic check runs.
+const agentColumns2 = db.prepare("PRAGMA table_info(agents)").all();
+if (!agentColumns2.some((c) => c.name === "last_digest_at")) {
+  db.exec("ALTER TABLE agents ADD COLUMN last_digest_at TEXT");
 }
 
 module.exports = db;

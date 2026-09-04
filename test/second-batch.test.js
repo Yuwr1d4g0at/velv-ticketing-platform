@@ -66,6 +66,10 @@ test("SLA thresholds are editable and the change takes effect without a restart"
     days_High: "2",
     days_Medium: "5",
     days_Low: "7",
+    fr_hours_Urgent: "1",
+    fr_hours_High: "4",
+    fr_hours_Medium: "8",
+    fr_hours_Low: "24",
     _csrf: csrf,
   });
   assert.equal(badRes.status, 400);
@@ -75,6 +79,10 @@ test("SLA thresholds are editable and the change takes effect without a restart"
     days_High: "2",
     days_Medium: "5",
     days_Low: "7",
+    fr_hours_Urgent: "1",
+    fr_hours_High: "4",
+    fr_hours_Medium: "8",
+    fr_hours_Low: "24",
     _csrf: csrf,
   });
   assert.equal(okRes.status, 302);

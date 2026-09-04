@@ -1,6 +1,6 @@
 <%- include('../partials/header') %>
 <h1>Settings</h1>
-<p class="muted">Also see <a href="/dashboard/settings/webhooks">Webhooks</a>, <a href="/dashboard/settings/login-log">Login activity</a>, and <a href="/dashboard/settings/custom-fields">Custom fields</a>.</p>
+<p class="muted">Also see <a href="/dashboard/settings/webhooks">Webhooks</a>, <a href="/dashboard/settings/login-log">Login activity</a>, <a href="/dashboard/settings/custom-fields">Custom fields</a>, <a href="/dashboard/recurring">Recurring tickets</a>, and <a href="/dashboard/settings/automation">Automation rules</a>.</p>
 
 <div class="card card-medium">
   <h2>Aging thresholds</h2>
@@ -14,6 +14,14 @@
       <label for="days_<%= p %>"><%= p %> (days)</label>
       <input type="number" id="days_<%= p %>" name="days_<%= p %>" min="1" max="365" required value="<%= thresholds[p] %>">
     <% }) %>
+
+    <h3>First-response targets</h3>
+    <p class="muted">A separate, usually tighter target for time-to-first-response (any agent activity on the ticket) - its own SLA breach email if missed, independent of the resolution threshold above.</p>
+    <% priorities.forEach(function(p) { %>
+      <label for="fr_hours_<%= p %>"><%= p %> (hours)</label>
+      <input type="number" id="fr_hours_<%= p %>" name="fr_hours_<%= p %>" min="1" max="720" required value="<%= frThresholds[p] %>">
+    <% }) %>
+
     <button type="submit" class="button-primary">Save thresholds</button>
   </form>
 </div>

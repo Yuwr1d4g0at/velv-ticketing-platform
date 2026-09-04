@@ -1,0 +1,92 @@
+<%- include('../partials/header') %>
+<h1>Automation rules</h1>
+<p class="muted">Runs once, automatically, the moment a ticket is submitted through the public request form - not on agent-initiated tickets, and not re-evaluated on later edits. At least one condition and one action is required per rule; every matching rule's actions all apply.</p>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">If</th>
+        <th scope="col">Then</th>
+        <th scope="col">Status</th>
+        <th scope="col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!rules.length) { %>
+        <tr><td colspan="5" class="empty-row">No automation rules yet.</td></tr>
+      <% } %>
+      <% rules.forEach(function(r) { %>
+        <tr class="<%= r.active ? '' : 'row-inactive' %>">
+          <td><%= r.name %></td>
+          <td>
+            <% const conditions = []; %>
+            <% if (r.condition_category) conditions.push('category = ' + r.condition_category); %>
+            <% if (r.condition_keyword) conditions.push('subject/description contains "' + r.condition_keyword + '"'); %>
+            <%= conditions.join(' and ') %>
+          </td>
+          <td>
+            <% const actions = []; %>
+            <% if (r.action_tag) actions.push('add tag "' + r.action_tag + '"'); %>
+            <% if (r.action_priority) actions.push('set priority to ' + r.action_priority); %>
+            <% if (r.assignee_name) actions.push('assign to ' + r.assignee_name); %>
+            <%= actions.join(', ') %>
+          </td>
+          <td><span class="badge <%= r.active ? 'badge-status-open' : '' %>"><%= r.active ? 'Active' : 'Paused' %></span></td>
+          <td>
+            <form action="/dashboard/settings/automation/<%= r.id %>/toggle" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button"><%= r.active ? 'Pause' : 'Resume' %></button>
+            </form>
+            <form action="/dashboard/settings/automation/<%= r.id %>/delete" method="POST" class="inline-form" data-confirm="Delete the rule &quot;<%= r.name %>&quot;? This can't be undone.">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button">Delete</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card card-medium">
+  <h2>Add a rule</h2>
+  <% if (error) { %>
+    <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+  <% } %>
+  <form action="/dashboard/settings/automation" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label for="name">Rule name</label>
+    <input type="text" id="name" name="name" required maxlength="200" placeholder="Escalate network outages">
+
+    <h3>If (at least one)</h3>
+    <label for="condition_category">Category is</label>
+    <select id="condition_category" name="condition_category">
+      <option value="">Any category</option>
+      <% categories.forEach(function(c) { %><option value="<%= c %>"><%= c %></option><% }) %>
+    </select>
+
+    <label for="condition_keyword">Subject or description contains</label>
+    <input type="text" id="condition_keyword" name="condition_keyword" maxlength="100" placeholder="outage">
+
+    <h3>Then (at least one)</h3>
+    <label for="action_tag">Add tag</label>
+    <input type="text" id="action_tag" name="action_tag" maxlength="30" placeholder="urgent-review">
+
+    <label for="action_priority">Set priority to</label>
+    <select id="action_priority" name="action_priority">
+      <option value="">Don't change</option>
+      <% priorities.forEach(function(p) { %><option value="<%= p %>"><%= p %></option><% }) %>
+    </select>
+
+    <label for="action_assigned_to">Assign to</label>
+    <select id="action_assigned_to" name="action_assigned_to">
+      <option value="">Don't change</option>
+      <% agents.forEach(function(a) { %><option value="<%= a.id %>"><%= a.name %></option><% }) %>
+    </select>
+
+    <button type="submit" class="button-primary">Add rule</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

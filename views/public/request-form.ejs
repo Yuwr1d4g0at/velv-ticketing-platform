@@ -30,6 +30,12 @@
         <% }) %>
       </select>
 
+      <label for="subcategory"><%= t('subcategory') %></label>
+      <input type="text" id="subcategory" name="subcategory" value="<%= values.subcategory || '' %>" maxlength="100" list="subcategory-options">
+      <datalist id="subcategory-options">
+        <% subcategorySuggestions.forEach(function(s) { %><option value="<%= s %>"><% }) %>
+      </datalist>
+
       <% if (assets.length) { %>
         <label for="asset_id"><%= t('related_asset') %></label>
         <select id="asset_id" name="asset_id">
@@ -57,6 +63,7 @@
 
       <label for="subject"><%= t('subject') %></label>
       <input type="text" id="subject" name="subject" value="<%= values.subject || '' %>" required maxlength="200">
+      <div id="kb-suggestions" hidden></div>
 
       <label for="description"><%= t('description') %></label>
       <textarea id="description" name="description" rows="8" required maxlength="5000"><%= values.description || '' %></textarea>

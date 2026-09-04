@@ -15,6 +15,12 @@
       <span class="stat-label">Avg. time to resolve &middot; <%= resolutionTime.count %> ticket<%= resolutionTime.count === 1 ? '' : 's' %></span>
     </div>
   <% } %>
+  <% if (reopenRate !== null) { %>
+    <div class="stat-tile stat-tile-resolution">
+      <span class="stat-count"><%= reopenRate.toFixed(0) %>%</span>
+      <span class="stat-label">Reopen rate &middot; <%= reopenedCount %> of <%= everResolvedCount %> ever-resolved ticket<%= everResolvedCount === 1 ? '' : 's' %></span>
+    </div>
+  <% } %>
 </div>
 
 <div class="card card-wide">
@@ -32,6 +38,55 @@
     <div class="vbar-axis">
       <span><%= volume[0].day %></span>
       <span><%= volume[volume.length - 1].day %></span>
+    </div>
+  <% } %>
+</div>
+
+<div class="card card-wide">
+  <h2>Satisfaction trend</h2>
+  <% if (!csatTrend.length) { %>
+    <p class="muted">No ratings yet.</p>
+  <% } else { %>
+    <div class="vbar-chart" role="img" aria-label="Bar chart of average satisfaction rating by month">
+      <% csatTrend.forEach(function(m) { %>
+        <div class="vbar-col" title="<%= m.month %>: <%= m.avg_rating.toFixed(1) %>/5 (<%= m.count %> rating<%= m.count === 1 ? '' : 's' %>)">
+          <div class="vbar-fill <%= m.barClass %>"></div>
+        </div>
+      <% }) %>
+    </div>
+    <div class="vbar-axis">
+      <span><%= csatTrend[0].month %></span>
+      <span><%= csatTrend[csatTrend.length - 1].month %></span>
+    </div>
+  <% } %>
+</div>
+
+<div class="card card-wide">
+  <h2>Agent performance</h2>
+  <% if (!agentPerformance.length) { %>
+    <p class="muted">No active agents.</p>
+  <% } else { %>
+    <div class="table-wrap">
+      <table class="ticket-table">
+        <thead>
+          <tr>
+            <th scope="col">Agent</th>
+            <th scope="col">Resolved</th>
+            <th scope="col">Avg. resolution time</th>
+            <th scope="col">Avg. CSAT</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% agentPerformance.forEach(function(a) { %>
+            <tr>
+              <td><%= a.name %></td>
+              <td><%= a.resolved_count %></td>
+              <td><% if (a.avg_resolution_days != null) { %><%= a.avg_resolution_days.toFixed(1) %>d<% } else { %>&mdash;<% } %></td>
+              <td><% if (a.avg_csat != null) { %><%= a.avg_csat.toFixed(1) %>/5<% } else { %>&mdash;<% } %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
     </div>
   <% } %>
 </div>

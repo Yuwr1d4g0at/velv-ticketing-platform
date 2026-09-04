@@ -6,7 +6,7 @@
 // suite runs.
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { businessHoursElapsed, isAgingTicket } = require("../src/aging");
+const { businessHoursElapsed, isAgingTicket, agingHoursElapsed } = require("../src/aging");
 
 // 2026-09-07 is a Monday, 2026-09-14 is the following Monday - fixed
 // reference points so every case below is unambiguous.
@@ -72,4 +72,52 @@ test("isAgingTicket: closed/resolved tickets never age regardless of elapsed tim
 test("isAgingTicket: a ticket created seconds ago is never aging, any priority", () => {
   const justNow = { status: "Open", created_at: new Date().toISOString().slice(0, 19).replace("T", " "), priority: "Urgent" };
   assert.equal(isAgingTicket(justNow, { Urgent: 1 }), false);
+});
+
+test("agingHoursElapsed: past paused_hours are subtracted from the elapsed total", () => {
+  // Created Monday 9am, "now" is the following Monday 9am - 45 raw business
+  // hours (see the full-business-week test above). 20 of those were spent
+  // waiting on the customer at some earlier point (already folded into
+  // paused_hours when the ticket left that status) - only 25 should count.
+  const ticket = {
+    created_at: "2026-09-07 09:00:00",
+    status: "Open",
+    paused_hours: 20,
+    waiting_since: null,
+  };
+  const now = new Date("2026-09-14T09:00:00Z");
+  assert.equal(agingHoursElapsed(ticket, now), 25);
+});
+
+test("agingHoursElapsed: currently-waiting time is excluded even before it's folded into paused_hours", () => {
+  // Created Monday 9am, entered Waiting on Customer Tuesday 9am (9 business
+  // hours in), "now" is Wednesday 9am (27 raw business hours from creation).
+  // The 18 hours spent waiting so far (Tue 9am -> Wed 9am) shouldn't count
+  // yet, even though waiting_since hasn't been cleared (the ticket is still
+  // in that status) - only the 9 hours before it started waiting should.
+  const ticket = {
+    created_at: "2026-09-07 09:00:00",
+    status: "Waiting on Customer",
+    paused_hours: 0,
+    waiting_since: "2026-09-08 09:00:00",
+  };
+  const now = new Date("2026-09-09T09:00:00Z");
+  assert.equal(agingHoursElapsed(ticket, now), 9);
+});
+
+test("agingHoursElapsed never goes negative even if paused_hours somehow exceeds the raw elapsed time", () => {
+  const ticket = { created_at: "2026-09-07 09:00:00", status: "Open", paused_hours: 999, waiting_since: null };
+  const now = new Date("2026-09-08T09:00:00Z");
+  assert.equal(agingHoursElapsed(ticket, now), 0);
+});
+
+test("isAgingTicket: a ticket sitting in Waiting on Customer is never flagged as aging", () => {
+  const ancient = {
+    status: "Waiting on Customer",
+    created_at: "2000-01-01 09:00:00",
+    priority: "Urgent",
+    waiting_since: "2000-01-01 09:00:00",
+    paused_hours: 0,
+  };
+  assert.equal(isAgingTicket(ancient, { Urgent: 1 }), false);
 });

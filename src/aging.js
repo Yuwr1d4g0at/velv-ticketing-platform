@@ -31,6 +31,15 @@ function currentThresholds() {
   return Object.fromEntries(rows.map((r) => [r.priority, r.days]));
 }
 
+// Same shape as currentThresholds() above, but for the separate
+// time-to-first-response target (see first_response_thresholds in
+// src/db/index.js) - a distinct, usually much tighter, expectation from
+// overall resolution.
+function currentFirstResponseThresholds() {
+  const rows = db.prepare("SELECT priority, hours FROM first_response_thresholds").all();
+  return Object.fromEntries(rows.map((r) => [r.priority, r.hours]));
+}
+
 function isBusinessDay(date) {
   const day = date.getDay();
   return day !== 0 && day !== 6;
@@ -62,15 +71,30 @@ function businessHoursElapsed(startDate, endDate) {
   return total;
 }
 
+// Business hours elapsed since a ticket was created, minus any time it's
+// spent in "Waiting on Customer" - both past pauses already folded into
+// paused_hours when the ticket left that status (see applyStatusChange in
+// dashboard.js), and, if it's *currently* waiting, the hours since
+// waiting_since - so time spent waiting on the requester never counts
+// against the team's own aging clock.
+function agingHoursElapsed(ticket, now = new Date()) {
+  const created = new Date(`${ticket.created_at.replace(" ", "T")}Z`);
+  let elapsed = businessHoursElapsed(created, now) - (ticket.paused_hours || 0);
+  if (ticket.status === "Waiting on Customer" && ticket.waiting_since) {
+    const waitingSince = new Date(`${ticket.waiting_since.replace(" ", "T")}Z`);
+    elapsed -= businessHoursElapsed(waitingSince, now);
+  }
+  return Math.max(0, elapsed);
+}
+
 // `now` defaults to the real clock in production use; tests pass a fixed
 // Date instead so a boundary case (crossing one priority's threshold but
 // not another's) is exact and deterministic rather than depending on which
 // weekday the test suite happens to run on.
 function isAgingTicket(ticket, thresholds = currentThresholds(), now = new Date()) {
   if (!["Open", "In Progress"].includes(ticket.status)) return false;
-  const created = new Date(`${ticket.created_at.replace(" ", "T")}Z`);
   const thresholdDays = thresholds[ticket.priority] ?? FALLBACK_DAYS;
-  return businessHoursElapsed(created, now) > thresholdDays * BUSINESS_HOURS_PER_DAY;
+  return agingHoursElapsed(ticket, now) > thresholdDays * BUSINESS_HOURS_PER_DAY;
 }
 
 // Annotates a batch of already-fetched ticket rows with is_aging, reading
@@ -80,4 +104,12 @@ function annotateAging(tickets) {
   return tickets.map((t) => ({ ...t, is_aging: isAgingTicket(t, thresholds) }));
 }
 
-module.exports = { isAgingTicket, annotateAging, currentThresholds, businessHoursElapsed };
+module.exports = {
+  isAgingTicket,
+  annotateAging,
+  currentThresholds,
+  currentFirstResponseThresholds,
+  businessHoursElapsed,
+  agingHoursElapsed,
+  BUSINESS_HOURS_PER_DAY,
+};

@@ -9,6 +9,8 @@ const { triggerWebhooks } = require("../webhooks");
 const assets = require("../assets");
 const kb = require("../kb");
 const customFields = require("../custom-fields");
+const automation = require("../automation");
+const notifications = require("../notifications");
 const {
   ATTACHMENTS_DIR,
   SAFE_PREVIEW_TYPES,
@@ -56,12 +58,24 @@ const previewLimiter = rateLimit({
   message: "Too many preview requests from this network. Please wait a few minutes and try again.",
 });
 
+// A flat, cross-category suggestion list for the subcategory field's
+// datalist (e.g. "Printer" typed once under Hardware shows up as a
+// suggestion later too) - convenience only, subcategory itself stays
+// freeform text, not a fixed enum like category.
+function subcategorySuggestions() {
+  return db
+    .prepare("SELECT DISTINCT subcategory FROM tickets WHERE subcategory IS NOT NULL AND subcategory != '' ORDER BY subcategory LIMIT 100")
+    .all()
+    .map((r) => r.subcategory);
+}
+
 router.get("/", (req, res) => {
   res.render("public/request-form", {
     title: t(req.lang, "submit_request_title"),
     categories: CATEGORIES,
     assets: assets.assignable(),
     customFieldsByCategory: customFields.byCategory(),
+    subcategorySuggestions: subcategorySuggestions(),
     errors: [],
     values: {},
     uploadHint: LIMITS_HINT,
@@ -73,12 +87,13 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
     requester_name = "",
     requester_email = "",
     category = "",
+    subcategory = "",
     subject = "",
     description = "",
     asset_id = "",
   } = req.body;
 
-  const values = { requester_name, requester_email, category, subject, description, asset_id };
+  const values = { requester_name, requester_email, category, subcategory, subject, description, asset_id };
   const errors = [];
 
   if (!requester_name.trim()) errors.push(t(req.lang, "err_name_required"));
@@ -104,6 +119,7 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
       categories: CATEGORIES,
       assets: assets.assignable(),
       customFieldsByCategory: customFields.byCategory(),
+      subcategorySuggestions: subcategorySuggestions(),
       errors,
       values,
       uploadHint: LIMITS_HINT,
@@ -133,13 +149,14 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
 
   const result = db
     .prepare(
-      `INSERT INTO tickets (subject, description, category, requester_name, requester_email, assigned_to, asset_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tickets (subject, description, category, subcategory, requester_name, requester_email, assigned_to, asset_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       subject.trim(),
       description.trim(),
       category,
+      subcategory.trim().slice(0, 100) || null,
       requester_name.trim(),
       requester_email.trim().toLowerCase(),
       nextAssignee ? nextAssignee.id : null,
@@ -151,6 +168,10 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
       `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, NULL, 'assignment', ?)`
     ).run(result.lastInsertRowid, "Auto-assigned on creation.");
   }
+
+  // Runs after auto-assignment above, so a rule's own assignment action (if
+  // any) is a deliberate override of the round-robin pick, not a race with it.
+  automation.applyRules(result.lastInsertRowid, { category, subject: subject.trim(), description: description.trim() });
 
   customFields.saveSubmittedCustomFields(result.lastInsertRowid, category, req.body);
 
@@ -299,19 +320,20 @@ router.post("/status/reply", statusLimiter, (req, res) => {
   }
 
   if (ticket.assigned_to) {
-    const agent = db.prepare("SELECT email FROM agents WHERE id = ?").get(ticket.assigned_to);
+    const agent = db.prepare("SELECT id, email FROM agents WHERE id = ?").get(ticket.assigned_to);
     sendAgentNotifiedOfReply({
       to: agent && agent.email,
       ticketId: ticket.id,
       subject: ticket.subject,
       message: body,
     }).catch((err) => console.error("Could not send agent-notified-of-reply email:", err.message));
+    if (agent) notifications.create(agent.id, "reply", ticket.id, `The requester replied on ticket #${ticket.id}.`);
   }
   // Watchers get the same nudge as the assignee - "keep me posted" without
   // being the one it's actually assigned to.
   const watchers = db
     .prepare(
-      `SELECT agents.email FROM ticket_watchers
+      `SELECT agents.id, agents.email FROM ticket_watchers
        JOIN agents ON agents.id = ticket_watchers.agent_id
        WHERE ticket_watchers.ticket_id = ? AND agents.id != ?`
     )
@@ -320,6 +342,7 @@ router.post("/status/reply", statusLimiter, (req, res) => {
     sendAgentNotifiedOfReply({ to: watcher.email, ticketId: ticket.id, subject: ticket.subject, message: body }).catch((err) =>
       console.error("Could not send watcher-notified-of-reply email:", err.message)
     );
+    notifications.create(watcher.id, "reply", ticket.id, `The requester replied on ticket #${ticket.id} you're watching.`);
   }
 
   const updated = db.prepare("SELECT * FROM tickets WHERE id = ?").get(ticket.id);
@@ -388,6 +411,20 @@ router.get("/kb", (req, res) => {
     articles: kb.publishedList({ category, q }),
     filters: { category, q },
   });
+});
+
+// Live suggestions as a requester types their subject on the request form
+// (see public/js/kb-suggest.js) - deflects a ticket that self-service could
+// already answer, before it's even submitted. Defined before /kb/:slug so
+// Express doesn't match "suggest.json" as a slug first. previewLimiter
+// (not statusLimiter) since typing fires one request per keystroke-pause,
+// the same "fires repeatedly just from using the page" shape as attachment
+// previews, not a handful of deliberate page loads.
+router.get("/kb/suggest.json", previewLimiter, (req, res) => {
+  const q = (req.query.q || "").trim().slice(0, 200);
+  if (q.length < 3) return res.json([]);
+  const matches = kb.publishedList({ q }).slice(0, 4).map((a) => ({ title: a.title, slug: a.slug }));
+  res.json(matches);
 });
 
 router.get("/kb/:slug", (req, res) => {
@@ -459,11 +496,12 @@ router.post("/rate/:token", statusLimiter, (req, res) => {
   // it to the whole active team the moment it comes in, the same "no
   // single natural recipient" reasoning as the warranty digest.
   if (rating <= 2) {
-    const activeAgents = db.prepare("SELECT email FROM agents WHERE active = 1").all();
+    const activeAgents = db.prepare("SELECT id, email FROM agents WHERE active = 1").all();
     for (const agent of activeAgents) {
       sendLowRatingEscalation({ to: agent.email, ticketId: ticket.id, subject: ticket.subject, rating, comment }).catch(
         (err) => console.error("Could not send low-rating escalation email:", err.message)
       );
+      notifications.create(agent.id, "low_rating", ticket.id, `Ticket #${ticket.id} just got a ${rating}-star rating.`);
     }
   }
 

@@ -15,8 +15,11 @@ COPY . .
 # data/ holds the SQLite database, attachments, and backups - all of it
 # needs to survive a container recreate, so it's meant to be a mounted
 # volume, not baked into the image (see the docker run example in README.md).
+# No VOLUME instruction here on purpose: Railway's build validation rejects
+# images that declare one, so the mount is done instead via a Railway Volume
+# attached to /app/data in the service settings (plain `docker run` users
+# still get the same effect with -v, see README.md).
 RUN mkdir -p data
-VOLUME ["/app/data"]
 
 ENV PORT=3000
 EXPOSE 3000
