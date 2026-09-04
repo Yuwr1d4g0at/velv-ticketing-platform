@@ -13,10 +13,10 @@ RUN npm ci --omit=dev
 COPY . .
 
 # data/ holds the SQLite database, attachments, and backups - all of it
-# needs to survive a container recreate, so it's meant to be a mounted
-# volume, not baked into the image (see the docker run example in README.md).
+# needs to survive a container recreate. Mount a Railway Volume at
+# /app/data from the service's Settings > Volumes tab (Docker's native
+# VOLUME instruction isn't supported by Railway's builder).
 RUN mkdir -p data
-VOLUME ["/app/data"]
 
 ENV PORT=3000
 EXPOSE 3000
