@@ -36,6 +36,13 @@ const ALLOWED_TYPES = {
   "text/csv": ".csv",
 };
 
+// The narrow subset of ALLOWED_TYPES safe to render inline (Content-
+// Disposition: inline) for a thumbnail preview, rather than force-downloaded.
+// Deliberately excludes PDF/TXT/CSV - this list exists specifically so a
+// preview route can refuse anything else, never inferred from the upload's
+// own claimed mime_type at serve time.
+const SAFE_PREVIEW_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, ATTACHMENTS_DIR),
   filename: (req, file, cb) => {
@@ -162,6 +169,7 @@ module.exports = {
   MAX_FILE_BYTES,
   MAX_FILES,
   LIMITS_HINT,
+  SAFE_PREVIEW_TYPES,
   handleUpload,
   saveAttachments,
   deleteUploadedFiles,

@@ -1,76 +1,88 @@
 <%- include('../partials/header') %>
-<div class="card card-medium">
-  <h1>Check ticket status</h1>
-  <p class="muted">Enter your ticket number and the email address you used to submit it.</p>
+<div class="card <%= ticket ? 'card-wide' : 'card-medium' %>">
+  <div class="status-lookup">
+    <span class="card-icon"><span class="icon icon-search"></span></span>
+    <h1><%= t('check_status_title') %></h1>
+    <p class="muted"><%= t('check_status_intro') %></p>
 
-  <% if (error) { %>
-    <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
-  <% } %>
+    <% if (error) { %>
+      <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
+    <% } %>
 
-  <form action="/status" method="POST" class="stacked-form">
-    <label for="ticket_id">Ticket number</label>
-    <input type="number" id="ticket_id" name="ticket_id" min="1" required>
+    <form action="/status" method="POST" class="stacked-form">
+      <label for="ticket_id"><%= t('ticket_number') %></label>
+      <input type="number" id="ticket_id" name="ticket_id" min="1" required>
 
-    <label for="requester_email">Email used to submit it</label>
-    <input type="email" id="requester_email" name="requester_email" required maxlength="200">
+      <label for="requester_email"><%= t('email_used') %></label>
+      <input type="email" id="requester_email" name="requester_email" required maxlength="200">
 
-    <button type="submit" class="button-primary">Check status</button>
-  </form>
+      <button type="submit" class="button-primary"><%= t('check_status_button') %></button>
+    </form>
+  </div>
 
   <% if (ticket) { %>
     <hr>
-    <h2>Ticket #<%= ticket.id %></h2>
-    <dl class="def-list">
-      <dt>Subject</dt><dd><%= ticket.subject %></dd>
-      <dt>Category</dt><dd><%= ticket.category %></dd>
-      <dt>Priority</dt><dd><%= ticket.priority %></dd>
-      <dt>Status</dt><dd><span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span></dd>
-      <dt>Description</dt><dd><%= ticket.description %></dd>
-      <dt>Submitted</dt><dd><%= ticket.created_at %></dd>
-      <dt>Last updated</dt><dd><%= ticket.updated_at %></dd>
-    </dl>
+    <div class="split-layout">
+      <div class="split-layout-aside">
+        <p class="split-legend"><%= t('ticket_hash') %><%= ticket.id %></p>
+        <h2><%= ticket.subject %></h2>
+        <dl class="def-list">
+          <dt><%= t('category') %></dt><dd><%= categoryLabel(ticket.category) %></dd>
+          <dt><%= t('priority') %></dt><dd><%= ticket.priority %></dd>
+          <dt><%= t('status') %></dt><dd><span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span></dd>
+          <dt><%= t('description') %></dt><dd><%= ticket.description %></dd>
+          <dt><%= t('submitted') %></dt><dd><%= ticket.created_at %></dd>
+          <dt><%= t('last_updated') %></dt><dd><%= ticket.updated_at %></dd>
+        </dl>
 
-    <% if (attachments.length) { %>
-      <h2>Attachments</h2>
-      <ul class="attachment-list">
-        <% attachments.forEach(function(a) { %>
-          <li class="attachment-item">
-            <span class="attachment-name"><%= a.original_name %></span>
-            <span class="attachment-meta"><%= a.size_label %></span>
-            <form class="attachment-download-form" action="/status/attachments/<%= a.id %>/download" method="POST">
-              <input type="hidden" name="ticket_id" value="<%= ticket.id %>">
-              <input type="hidden" name="requester_email" value="<%= ticket.requester_email %>">
-              <button type="submit" class="attachment-download-btn"><span class="icon icon-download"></span>Download</button>
-            </form>
-          </li>
-        <% }) %>
-      </ul>
-    <% } %>
+        <% if (attachments.length) { %>
+          <p class="split-legend"><%= t('attachments') %></p>
+          <ul class="attachment-list">
+            <% attachments.forEach(function(a) { %>
+              <li class="attachment-item">
+                <% if (a.is_previewable) { %>
+                  <img class="attachment-thumb" src="/status/attachments/<%= a.id %>/preview?ticket_id=<%= ticket.id %>&requester_email=<%= encodeURIComponent(ticket.requester_email) %>" alt="">
+                <% } %>
+                <span class="attachment-name"><%= a.original_name %></span>
+                <span class="attachment-meta"><%= a.size_label %></span>
+                <form class="attachment-download-form" action="/status/attachments/<%= a.id %>/download" method="POST">
+                  <input type="hidden" name="ticket_id" value="<%= ticket.id %>">
+                  <input type="hidden" name="requester_email" value="<%= ticket.requester_email %>">
+                  <button type="submit" class="attachment-download-btn"><span class="icon icon-download"></span>Download</button>
+                </form>
+              </li>
+            <% }) %>
+          </ul>
+        <% } %>
+      </div>
 
-    <h2>Conversation</h2>
-    <ul class="conversation-thread">
-      <% if (!conversation.length) { %>
-        <li class="muted">No replies yet.</li>
-      <% } %>
-      <% conversation.forEach(function(a) { %>
-        <li class="conversation-item <%= a.type === 'requester_reply' ? 'conversation-item-you' : 'conversation-item-agent' %>">
-          <div class="activity-meta">
-            <strong><%= a.type === 'requester_reply' ? 'You' : (a.agent_name || 'Velv Helpdesk') %></strong>
-            &middot; <%= a.created_at %>
-          </div>
-          <div class="activity-body preserve-newlines"><%= a.body %></div>
-        </li>
-      <% }) %>
-    </ul>
+      <div class="split-layout-main">
+        <p class="split-legend"><%= t('conversation') %></p>
+        <ul class="conversation-thread">
+          <% if (!conversation.length) { %>
+            <li class="muted"><%= t('no_replies_yet') %></li>
+          <% } %>
+          <% conversation.forEach(function(a) { %>
+            <li class="conversation-item <%= a.type === 'requester_reply' ? 'conversation-item-you' : 'conversation-item-agent' %>">
+              <div class="activity-meta">
+                <strong><%= a.type === 'requester_reply' ? t('you') : (a.agent_name || 'Velv Helpdesk') %></strong>
+                &middot; <%= a.created_at %>
+              </div>
+              <div class="activity-body preserve-newlines"><%= a.body %></div>
+            </li>
+          <% }) %>
+        </ul>
 
-    <form action="/status/reply" method="POST" class="stacked-form">
-      <input type="hidden" name="ticket_id" value="<%= ticket.id %>">
-      <input type="hidden" name="requester_email" value="<%= ticket.requester_email %>">
-      <label for="message">Add a reply</label>
-      <textarea id="message" name="message" rows="4" maxlength="5000" placeholder="Ask a follow-up question or add more detail&hellip;"></textarea>
-      <p class="field-hint">Replying to a Resolved or Closed ticket reopens it.</p>
-      <button type="submit" class="button-primary">Send reply</button>
-    </form>
+        <form action="/status/reply" method="POST" class="stacked-form">
+          <input type="hidden" name="ticket_id" value="<%= ticket.id %>">
+          <input type="hidden" name="requester_email" value="<%= ticket.requester_email %>">
+          <label for="message"><%= t('add_a_reply') %></label>
+          <textarea id="message" name="message" rows="4" maxlength="5000" placeholder="<%= t('reply_placeholder') %>"></textarea>
+          <p class="field-hint"><%= t('reply_reopens_hint') %></p>
+          <button type="submit" class="button-primary"><span class="icon icon-send"></span><%= t('send_reply_button') %></button>
+        </form>
+      </div>
+    </div>
   <% } %>
 </div>
 <%- include('../partials/footer') %>

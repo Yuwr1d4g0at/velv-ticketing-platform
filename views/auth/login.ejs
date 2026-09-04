@@ -1,19 +1,26 @@
 <%- include('../partials/header') %>
-<div class="card card-narrow">
-  <span class="card-icon"><span class="icon icon-lock"></span></span>
-  <h1>Helpdesk login</h1>
-  <% if (error) { %>
-    <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
-  <% } %>
-  <form action="/login" method="POST" class="stacked-form">
-    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-    <label for="email">Email</label>
-    <input type="email" id="email" name="email" required autofocus>
+<div class="auth-split">
+  <div class="auth-split-brand">
+    <img src="/img/velv-logo-white.png" alt="Velv">
+    <h2>Our Team.<br>Remotely Yours.</h2>
+    <p>Sign in to manage requests, assets, and your team's queue.</p>
+  </div>
+  <div class="auth-split-form">
+    <span class="card-icon"><span class="icon icon-lock"></span></span>
+    <h1>Helpdesk login</h1>
+    <% if (error) { %>
+      <div class="alert alert-error"><span class="icon icon-alert-triangle"></span><%= error %></div>
+    <% } %>
+    <form action="/login" method="POST" class="stacked-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autofocus>
 
-    <label for="password">Password</label>
-    <input type="password" id="password" name="password" required>
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required>
 
-    <button type="submit" class="button-primary">Log in</button>
-  </form>
+      <button type="submit" class="button-primary">Log in</button>
+    </form>
+  </div>
 </div>
 <%- include('../partials/footer') %>

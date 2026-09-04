@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="<%= typeof lang !== 'undefined' ? lang : 'en' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -31,11 +31,17 @@
               <button type="submit" class="link-button">Log out</button>
             </form>
           <% } else { %>
-            <a href="/">Submit a request</a>
-            <a href="/status">Check status</a>
-            <a href="/login" class="nav-cta">Helpdesk login</a>
+            <a href="/"><%= t('nav_submit_request') %></a>
+            <a href="/status"><%= t('nav_check_status') %></a>
+            <a href="/login" class="nav-cta"><%= t('nav_helpdesk_login') %></a>
           <% } %>
         </nav>
+        <% if (typeof currentAgent === 'undefined' || !currentAgent) { %>
+          <div class="lang-toggle">
+            <a href="/lang/en" class="<%= lang === 'en' ? 'is-active' : '' %>">EN</a>
+            <a href="/lang/pt" class="<%= lang === 'pt' ? 'is-active' : '' %>">PT</a>
+          </div>
+        <% } %>
         <label class="lights-toggle">
           <input type="checkbox" id="lights-switch" checked>
           <span class="lights-track">

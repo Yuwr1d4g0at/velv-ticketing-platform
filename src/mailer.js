@@ -99,6 +99,18 @@ function sendAgentNotifiedOfReply({ to, ticketId, subject, message }) {
   );
 }
 
+// Proactive nudge for whoever's assigned once a ticket crosses its priority-
+// scaled aging threshold - see src/sla.js for when this actually fires.
+function sendSlaBreachEmail({ to, ticketId, subject, priority, ageDays }) {
+  return send(
+    to,
+    `SLA warning: ticket #${ticketId} is aging (${priority})`,
+    `Ticket #${ticketId} ("${subject}") is ${priority} priority and has been open for ${ageDays.toFixed(1)} days - past its aging threshold.\n\n` +
+      `${APP_URL ? `${APP_URL}/dashboard/tickets/${ticketId}` : "Check the dashboard"} for details.\n\n` +
+      `Our Team. Remotely Yours.\nVelv`
+  );
+}
+
 module.exports = {
   enabled,
   sendTicketCreatedEmail,
@@ -106,4 +118,5 @@ module.exports = {
   sendResolvedEmail,
   sendReplyEmail,
   sendAgentNotifiedOfReply,
+  sendSlaBreachEmail,
 };

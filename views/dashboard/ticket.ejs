@@ -1,4 +1,10 @@
 <%- include('../partials/header') %>
+<% if (mergedFrom) { %>
+  <div class="alert alert-info"><span class="icon icon-alert-triangle"></span>Ticket #<%= mergedFrom %> was merged into this one - its activity and attachments now appear below.</div>
+<% } %>
+<% if (ticket.data_erased_at) { %>
+  <div class="alert alert-info"><span class="icon icon-alert-triangle"></span>This requester's data was erased on <%= ticket.data_erased_at %> per a GDPR request. Name, email, and free-text content below have been redacted.</div>
+<% } %>
 <div class="ticket-head">
   <div>
     <h1>#<%= ticket.id %> &middot; <%= ticket.subject %></h1>
@@ -53,6 +59,9 @@
         <ul class="attachment-list">
           <% attachments.forEach(function(a) { %>
             <li class="attachment-item">
+              <% if (a.is_previewable) { %>
+                <img class="attachment-thumb" src="/dashboard/tickets/<%= ticket.id %>/attachments/<%= a.id %>/preview" alt="">
+              <% } %>
               <span class="attachment-name"><%= a.original_name %></span>
               <span class="attachment-meta">
                 <%= a.uploaded_by === 'agent' ? a.agent_name : ticket.requester_name %> &middot; <%= a.size_label %>
@@ -175,6 +184,42 @@
         </select>
         <button type="submit" class="button-secondary">Update assignment</button>
       </form>
+    </div>
+
+    <div class="card">
+      <h2>Merge</h2>
+      <p class="muted">Fold this ticket into another one - its activity, attachments, and tags all move over, and this ticket closes and redirects here.</p>
+      <form
+        action="/dashboard/tickets/<%= ticket.id %>/merge"
+        method="POST"
+        class="stacked-form"
+        data-confirm="Merge ticket #<%= ticket.id %> into another ticket? Its activity, attachments, and tags will move over, and this ticket will close. This can't be undone from here."
+      >
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <label for="target_ticket_id">Merge into ticket #</label>
+        <input type="number" id="target_ticket_id" name="target_ticket_id" min="1" required>
+        <button type="submit" class="button-secondary">Merge</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Requester data</h2>
+      <% if (ticket.data_erased_at) { %>
+        <p class="muted">Erased on <%= ticket.data_erased_at %>.</p>
+      <% } else { %>
+        <p class="muted">GDPR export/erasure for <%= ticket.requester_email %>, across all of their tickets.</p>
+        <a class="button-secondary" href="/dashboard/tickets/<%= ticket.id %>/privacy/export.json">
+          <span class="icon icon-download"></span>Export data
+        </a>
+        <form
+          action="/dashboard/tickets/<%= ticket.id %>/privacy/erase"
+          method="POST"
+          data-confirm="Permanently erase <%= ticket.requester_email %>'s name, email, and free-text content across ALL of their tickets? This can't be undone."
+        >
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button type="submit" class="button-secondary">Erase data</button>
+        </form>
+      <% } %>
     </div>
 
     <% if (otherTickets.length) { %>

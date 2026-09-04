@@ -1,0 +1,280 @@
+const { test, before, after } = require("node:test");
+const assert = require("node:assert/strict");
+const { DatabaseSync } = require("node:sqlite");
+const bcrypt = require("bcryptjs");
+const { startTestApp, makeClient, extractCsrf } = require("./helpers");
+
+let app, client, db;
+
+before(async () => {
+  app = await startTestApp();
+  client = makeClient(app.baseUrl);
+  db = new DatabaseSync(app.dbPath);
+
+  db.prepare("INSERT INTO agents (name, email, password_hash) VALUES (?, ?, ?)").run(
+    "Feature Agent",
+    "feature-agent@example.com",
+    bcrypt.hashSync("correct-password", 4)
+  );
+
+  const loginPage = await client.get("/login");
+  const csrf = extractCsrf(await loginPage.text());
+  await client.postForm("/login", { email: "feature-agent@example.com", password: "correct-password", _csrf: csrf });
+});
+
+after(() => {
+  db.close();
+  return app.close();
+});
+
+async function submitTicket(fields) {
+  const res = await client.postForm("/", {
+    requester_name: "Feature Requester",
+    requester_email: "feature-requester@example.com",
+    category: "Hardware",
+    subject: "Default subject",
+    description: "Default description",
+    ...fields,
+  });
+  assert.equal(res.status, 302);
+  return res.headers.get("location").match(/confirmation\/(\d+)/)[1];
+}
+
+test("GET /healthz reports ok without requiring login", async () => {
+  const res = await fetch(`${app.baseUrl}/healthz`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { status: "ok" });
+});
+
+test("asset CSV export includes a header row and the asset's data", async () => {
+  const page = await client.get("/dashboard/assets");
+  const csrf = extractCsrf(await page.text());
+  await client.postForm("/dashboard/assets", { name: "CSV Export Laptop", category: "Laptop", asset_tag: "CSV-1", _csrf: csrf });
+
+  const res = await client.get("/dashboard/assets/export.csv");
+  assert.equal(res.status, 200);
+  const csv = await res.text();
+  assert.match(csv, /^ID,Name,Asset tag/);
+  assert.match(csv, /CSV Export Laptop/);
+  assert.match(csv, /CSV-1/);
+});
+
+test("editing an asset logs one activity line per changed field, not a generic blob", async () => {
+  const page = await client.get("/dashboard/assets");
+  const csrf = extractCsrf(await page.text());
+  const createRes = await client.postForm("/dashboard/assets", { name: "History Laptop", category: "Laptop", _csrf: csrf });
+  const assetId = createRes.headers.get("location").match(/assets\/(\d+)/)[1];
+
+  const detailPage = await client.get(`/dashboard/assets/${assetId}`);
+  const editCsrf = extractCsrf(await detailPage.text());
+  await client.postForm(`/dashboard/assets/${assetId}`, {
+    name: "History Laptop",
+    category: "Laptop",
+    status: "Under Repair",
+    location: "Lisbon Office",
+    _csrf: editCsrf,
+  });
+
+  const html = await (await client.get(`/dashboard/assets/${assetId}`)).text();
+  assert.match(html, /Asset created\./);
+  assert.match(html, /Status changed from &#34;In Use&#34; to &#34;Under Repair&#34;/);
+  assert.match(html, /Location changed from &#34;\(empty\)&#34; to &#34;Lisbon Office&#34;/);
+});
+
+test("merging a ticket moves its activity/attachments/tags and redirects future visits", async () => {
+  const sourceId = await submitTicket({ subject: "Duplicate report" });
+  const targetId = await submitTicket({ subject: "Original report" });
+
+  const sourcePage = await client.get(`/dashboard/tickets/${sourceId}`);
+  const csrf = extractCsrf(await sourcePage.text());
+  const noteCsrf = csrf;
+  await client.postForm(`/dashboard/tickets/${sourceId}/tags`, { tag: "printer", _csrf: noteCsrf });
+
+  const mergeRes = await client.postForm(`/dashboard/tickets/${sourceId}/merge`, {
+    target_ticket_id: targetId,
+    _csrf: csrf,
+  });
+  assert.equal(mergeRes.status, 302);
+  assert.match(mergeRes.headers.get("location"), new RegExp(`tickets/${targetId}$`));
+
+  const targetHtml = await (await client.get(`/dashboard/tickets/${targetId}`)).text();
+  assert.match(targetHtml, new RegExp(`Merged ticket #${sourceId}`));
+  assert.match(targetHtml, /printer/); // tag moved over
+
+  const revisit = await client.get(`/dashboard/tickets/${sourceId}`);
+  assert.equal(revisit.status, 302);
+  assert.match(revisit.headers.get("location"), new RegExp(`tickets/${targetId}\\?merged_from=${sourceId}`));
+
+  const revisitFollowed = await (await client.get(revisit.headers.get("location"))).text();
+  assert.match(revisitFollowed, /was merged into this one/);
+});
+
+test("saved views: an agent can save, list, and delete their own view; can't delete another agent's", async () => {
+  db.prepare("INSERT INTO agents (name, email, password_hash) VALUES (?, ?, ?)").run(
+    "Other Agent",
+    "other-agent@example.com",
+    bcrypt.hashSync("correct-password", 4)
+  );
+  const otherClient = makeClient(app.baseUrl);
+  const otherLoginPage = await otherClient.get("/login");
+  const otherCsrf = extractCsrf(await otherLoginPage.text());
+  await otherClient.postForm("/login", { email: "other-agent@example.com", password: "correct-password", _csrf: otherCsrf });
+
+  const home = await client.get("/dashboard?status=Open");
+  const csrf = extractCsrf(await home.text());
+  const saveRes = await client.postForm("/dashboard/views", { name: "My Open Queue", query_string: "status=Open", _csrf: csrf });
+  assert.equal(saveRes.status, 302);
+
+  const homeWithView = await (await client.get("/dashboard")).text();
+  assert.match(homeWithView, /My Open Queue/);
+  const viewId = homeWithView.match(/views\/(\d+)\/delete/)[1];
+
+  // The other agent doesn't see it, and can't delete it.
+  const otherHome = await (await otherClient.get("/dashboard")).text();
+  assert.doesNotMatch(otherHome, /My Open Queue/);
+  await otherClient.postForm(`/dashboard/views/${viewId}/delete`, { _csrf: otherCsrf });
+  const stillThere = await (await client.get("/dashboard")).text();
+  assert.match(stillThere, /My Open Queue/);
+
+  const deleteRes = await client.postForm(`/dashboard/views/${viewId}/delete`, { _csrf: csrf });
+  assert.equal(deleteRes.status, 302);
+  const gone = await (await client.get("/dashboard")).text();
+  assert.doesNotMatch(gone, /My Open Queue/);
+});
+
+test("SLA breach check emails once per breach and clears on reopen", async () => {
+  const { checkSlaBreaches } = require("../src/sla");
+  const ticketId = await submitTicket({ subject: "Aging urgent ticket" });
+
+  const agentRow = db.prepare("SELECT id FROM agents WHERE email = ?").get("feature-agent@example.com");
+  db.prepare("UPDATE tickets SET priority = 'Urgent', assigned_to = ?, created_at = datetime('now', '-3 days') WHERE id = ?").run(
+    agentRow.id,
+    ticketId
+  );
+
+  const firstRun = checkSlaBreaches();
+  assert.ok(firstRun >= 1);
+  let ticket = db.prepare("SELECT sla_alerted_at FROM tickets WHERE id = ?").get(ticketId);
+  assert.ok(ticket.sla_alerted_at);
+
+  // Doesn't alert again on a second pass for the same still-open breach.
+  db.prepare("UPDATE tickets SET sla_alerted_at = 'sentinel' WHERE id = ?").run(ticketId);
+  checkSlaBreaches();
+  ticket = db.prepare("SELECT sla_alerted_at FROM tickets WHERE id = ?").get(ticketId);
+  assert.equal(ticket.sla_alerted_at, "sentinel");
+
+  // Reopening (via the dashboard status route) clears it so a future breach
+  // can alert again.
+  db.prepare("UPDATE tickets SET status = 'Resolved' WHERE id = ?").run(ticketId);
+  const ticketPage = await client.get(`/dashboard/tickets/${ticketId}`);
+  const csrf = extractCsrf(await ticketPage.text());
+  await client.postForm(`/dashboard/tickets/${ticketId}/status`, { status: "Open", _csrf: csrf });
+  ticket = db.prepare("SELECT sla_alerted_at FROM tickets WHERE id = ?").get(ticketId);
+  assert.equal(ticket.sla_alerted_at, null);
+});
+
+test("dashboard full-text search finds a ticket by a word only in its description", async () => {
+  await submitTicket({ subject: "Weird noise", description: "The espresso machine in the kitchen is leaking badly." });
+
+  const res = await client.get("/dashboard?q=espresso");
+  const html = await res.text();
+  assert.match(html, /Weird noise/);
+
+  // Prefix matching: a partial word still finds it.
+  const prefixRes = await client.get("/dashboard?q=espre");
+  assert.match(await prefixRes.text(), /Weird noise/);
+});
+
+test("image attachments get an inline preview; non-image types refuse one", async () => {
+  const formData = new FormData();
+  formData.append("requester_name", "Preview Tester");
+  formData.append("requester_email", "preview-tester@example.com");
+  formData.append("category", "Hardware");
+  formData.append("subject", "Broken screen photo");
+  formData.append("description", "See attached.");
+  const pngBytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64"
+  );
+  formData.append("attachments", new Blob([pngBytes], { type: "image/png" }), "screen.png");
+  formData.append("attachments", new Blob(["plain text"], { type: "text/plain" }), "notes.txt");
+
+  const submitRes = await fetch(`${app.baseUrl}/`, { method: "POST", body: formData, redirect: "manual" });
+  const ticketId = submitRes.headers.get("location").match(/confirmation\/(\d+)/)[1];
+
+  const statusRes = await client.postForm("/status", { ticket_id: ticketId, requester_email: "preview-tester@example.com" });
+  const statusHtml = await statusRes.text();
+  assert.match(statusHtml, /attachments\/\d+\/preview\?ticket_id/); // at least one inline preview rendered
+
+  const pngId = db.prepare("SELECT id FROM attachments WHERE ticket_id = ? AND original_name = ?").get(ticketId, "screen.png").id;
+  const txtId = db.prepare("SELECT id FROM attachments WHERE ticket_id = ? AND original_name = ?").get(ticketId, "notes.txt").id;
+
+  const previewRes = await client.get(
+    `/status/attachments/${pngId}/preview?ticket_id=${ticketId}&requester_email=preview-tester%40example.com`
+  );
+  assert.equal(previewRes.status, 200);
+  assert.equal(previewRes.headers.get("content-type"), "image/png");
+  assert.equal(previewRes.headers.get("content-disposition"), "inline");
+
+  const txtPreviewRes = await client.get(
+    `/status/attachments/${txtId}/preview?ticket_id=${ticketId}&requester_email=preview-tester%40example.com`
+  );
+  assert.equal(txtPreviewRes.status, 404);
+});
+
+test("GDPR export bundles a requester's tickets; erasure redacts identity, free text, and deletes attachments", async () => {
+  const formData = new FormData();
+  formData.append("requester_name", "Privacy Person");
+  formData.append("requester_email", "privacy-person@example.com");
+  formData.append("category", "Other");
+  formData.append("subject", "Personal request");
+  formData.append("description", "Some personal details here.");
+  formData.append("attachments", new Blob(["personal doc"], { type: "text/plain" }), "personal.txt");
+  const submitRes = await fetch(`${app.baseUrl}/`, { method: "POST", body: formData, redirect: "manual" });
+  const ticketId = submitRes.headers.get("location").match(/confirmation\/(\d+)/)[1];
+
+  const ticketPage = await client.get(`/dashboard/tickets/${ticketId}`);
+  const csrf = extractCsrf(await ticketPage.text());
+  await client.postForm(`/dashboard/tickets/${ticketId}/note`, { body: "Called the requester about this.", _csrf: csrf });
+
+  const exportRes = await client.get(`/dashboard/tickets/${ticketId}/privacy/export.json`);
+  assert.equal(exportRes.status, 200);
+  const bundle = await exportRes.json();
+  assert.equal(bundle.requester_email, "privacy-person@example.com");
+  assert.equal(bundle.tickets[0].ticket.subject, "Personal request");
+
+  const attachmentRow = db.prepare("SELECT stored_name FROM attachments WHERE ticket_id = ?").get(ticketId);
+  const fs = require("fs");
+  const path = require("path");
+  const storedPath = path.join(path.dirname(app.dbPath), "attachments", attachmentRow.stored_name);
+  assert.ok(fs.existsSync(storedPath));
+
+  const eraseRes = await client.postForm(`/dashboard/tickets/${ticketId}/privacy/erase`, { _csrf: csrf });
+  assert.equal(eraseRes.status, 302);
+
+  const erased = db.prepare("SELECT * FROM tickets WHERE id = ?").get(ticketId);
+  assert.equal(erased.requester_name, "[erased]");
+  assert.notEqual(erased.requester_email, "privacy-person@example.com");
+  assert.match(erased.description, /erased/);
+  assert.ok(erased.data_erased_at);
+
+  const activity = db.prepare("SELECT body FROM ticket_activity WHERE ticket_id = ? AND type = 'note'").all(ticketId);
+  assert.ok(activity.every((a) => /erased/.test(a.body)));
+
+  assert.equal(fs.existsSync(storedPath), false);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM attachments WHERE ticket_id = ?").get(ticketId).c, 0);
+});
+
+test("Portuguese language toggle translates the public request form", async () => {
+  const enPage = await client.get("/");
+  assert.match(await enPage.text(), /Submit a request/);
+
+  const ptClient = makeClient(app.baseUrl);
+  const langRes = await ptClient.get("/lang/pt", { redirect: "manual" });
+  assert.equal(langRes.status, 302);
+
+  const ptPage = await ptClient.get("/");
+  const ptHtml = await ptPage.text();
+  assert.match(ptHtml, /Enviar um pedido/);
+  assert.doesNotMatch(ptHtml, /Submit a request/);
+});

@@ -9,6 +9,8 @@ const helmet = require("helmet");
 
 const { attachAgent } = require("./middleware/auth");
 const { csrfToken } = require("./middleware/csrf");
+const { attachLang } = require("./middleware/lang");
+const { LANGUAGES } = require("./i18n");
 const publicRoutes = require("./routes/public");
 const authRoutes = require("./routes/auth");
 const dashboardRoutes = require("./routes/dashboard");
@@ -61,8 +63,31 @@ app.use(
   })
 );
 
+// Unauthenticated on purpose - a host or uptime monitor polling this has no
+// way to log in. Checks real DB connectivity, not just "the process is up".
+app.get("/healthz", (req, res) => {
+  try {
+    db.prepare("SELECT 1").get();
+    res.status(200).json({ status: "ok" });
+  } catch (err) {
+    res.status(503).json({ status: "error", message: err.message });
+  }
+});
+
 app.use(attachAgent(db));
 app.use(csrfToken);
+app.use(attachLang);
+
+// Sets the language cookie and bounces back where the visitor came from - a
+// plain link-based toggle (see the header partial), not JS-driven, since
+// unlike the Lights theme toggle this changes server-rendered text, not
+// just CSS.
+app.get("/lang/:code", (req, res) => {
+  const code = LANGUAGES.includes(req.params.code) ? req.params.code : "en";
+  res.cookie("velv_lang", code, { maxAge: 365 * 24 * 60 * 60 * 1000, sameSite: "lax", secure: COOKIE_SECURE });
+  const back = req.get("Referer");
+  res.redirect(back && back.startsWith(`${req.protocol}://${req.get("host")}`) ? back : "/");
+});
 
 app.use("/dashboard", dashboardRoutes);
 app.use("/", authRoutes);

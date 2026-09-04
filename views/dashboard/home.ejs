@@ -69,6 +69,24 @@
   </a>
 </form>
 
+<div class="tag-row saved-views-row">
+  <% savedViews.forEach(function(v) { %>
+    <span class="tag-chip">
+      <a href="/dashboard?<%= v.query_string %>"><%= v.name %></a>
+      <form action="/dashboard/views/<%= v.id %>/delete" method="POST">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button type="submit" aria-label="Delete saved view <%= v.name %>">&times;</button>
+      </form>
+    </span>
+  <% }) %>
+  <form action="/dashboard/views" method="POST" class="tag-add-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <input type="hidden" name="query_string" value="<%= exportQuery %>">
+    <input type="text" name="name" placeholder="Save current filters as&hellip;" maxlength="100">
+    <button type="submit" class="button-secondary">Save view</button>
+  </form>
+</div>
+
 <form action="/dashboard/bulk/status" method="POST" id="bulk-form">
   <input type="hidden" name="_csrf" value="<%= csrfToken %>">
   <input type="hidden" name="redirect_to" value="/dashboard?<%= exportQuery %>&page=<%= page %>">

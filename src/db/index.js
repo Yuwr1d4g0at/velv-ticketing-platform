@@ -140,13 +140,68 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_assets_status ON assets(status);
 
+  -- Field-level audit trail for assets, same idea as ticket_activity. Logged
+  -- by diffing old vs. new values in src/assets.js's update(), not by
+  -- recording every raw form submit - a save that changes nothing produces
+  -- no entry, and a save that changes three fields produces three readable
+  -- lines instead of one opaque "updated" blob.
+  CREATE TABLE IF NOT EXISTS asset_activity (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id   INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    agent_id   INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_asset_activity_asset_id ON asset_activity(asset_id);
+
+  -- A saved dashboard filter combo. Personal, not shared (unlike everything
+  -- else in this app's flat permission model) - ON DELETE CASCADE is fine
+  -- here even though agents are never hard-deleted in practice, since a
+  -- saved view is pure convenience, nothing worth preserving on its own.
+  CREATE TABLE IF NOT EXISTS saved_views (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id     INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    query_string TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_saved_views_agent_id ON saved_views(agent_id);
+
   -- Backs the custom express-session store in src/session-store.js
   CREATE TABLE IF NOT EXISTS sessions (
     sid     TEXT PRIMARY KEY,
     data    TEXT NOT NULL,
     expires INTEGER NOT NULL
   );
+
+  -- Full-text search over subject/description. External-content FTS5 table
+  -- (content='tickets') so the indexed text isn't duplicated in the FTS
+  -- table itself - the three triggers below are what's actually needed for
+  -- SQLite's docs example.
+  CREATE VIRTUAL TABLE IF NOT EXISTS tickets_fts USING fts5(
+    subject, description, content='tickets', content_rowid='id'
+  );
+  CREATE TRIGGER IF NOT EXISTS tickets_fts_ai AFTER INSERT ON tickets BEGIN
+    INSERT INTO tickets_fts(rowid, subject, description) VALUES (new.id, new.subject, new.description);
+  END;
+  CREATE TRIGGER IF NOT EXISTS tickets_fts_ad AFTER DELETE ON tickets BEGIN
+    INSERT INTO tickets_fts(tickets_fts, rowid, subject, description) VALUES ('delete', old.id, old.subject, old.description);
+  END;
+  CREATE TRIGGER IF NOT EXISTS tickets_fts_au AFTER UPDATE ON tickets BEGIN
+    INSERT INTO tickets_fts(tickets_fts, rowid, subject, description) VALUES ('delete', old.id, old.subject, old.description);
+    INSERT INTO tickets_fts(rowid, subject, description) VALUES (new.id, new.subject, new.description);
+  END;
 `);
+
+// The triggers above only cover tickets created/edited from here on - a
+// database that already had tickets before FTS5 search was added needs a
+// one-time backfill, guarded so it only ever runs once (an empty index with
+// existing tickets is exactly and only that first-boot state).
+const ftsCount = db.prepare("SELECT COUNT(*) AS c FROM tickets_fts").get().c;
+const ticketsCount = db.prepare("SELECT COUNT(*) AS c FROM tickets").get().c;
+if (ftsCount === 0 && ticketsCount > 0) {
+  db.exec(`INSERT INTO tickets_fts(rowid, subject, description) SELECT id, subject, description FROM tickets`);
+}
 
 // One-off migration: CREATE TABLE IF NOT EXISTS above doesn't touch a table
 // that already exists, so a database created before 'priority_change' was
@@ -236,6 +291,33 @@ if (!attachmentColumns.some((c) => c.name === "visible_to_requester")) {
 const ticketColumns2 = db.prepare("PRAGMA table_info(tickets)").all();
 if (!ticketColumns2.some((c) => c.name === "asset_id")) {
   db.exec("ALTER TABLE tickets ADD COLUMN asset_id INTEGER REFERENCES assets(id) ON DELETE SET NULL");
+}
+
+// Seventh migration: guarded ALTER TABLE for tickets.sla_alerted_at. NULL
+// means "never alerted"; set the moment a breach email goes out (see
+// scripts/check-sla.js) and cleared again whenever the ticket reopens (see
+// applyStatusChange / the requester-reply auto-reopen in src/routes/public.js)
+// so a ticket that breaches, gets fixed, and later reopens can alert again.
+const ticketColumns3 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns3.some((c) => c.name === "sla_alerted_at")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN sla_alerted_at TEXT");
+}
+
+// Eighth migration: guarded ALTER TABLE for tickets.merged_into_id. A merged
+// ticket keeps its own row (and id) but points at the ticket its activity/
+// attachments/tags were moved onto - see the /merge route in dashboard.js.
+const ticketColumns4 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns4.some((c) => c.name === "merged_into_id")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN merged_into_id INTEGER REFERENCES tickets(id) ON DELETE SET NULL");
+}
+
+// Ninth migration: guarded ALTER TABLE for tickets.data_erased_at. Set by the
+// GDPR erasure action (dashboard.js) so the ticket detail page can show an
+// honest "this requester's data was erased on <date>" notice instead of
+// silently presenting redacted placeholders as if they were the original data.
+const ticketColumns5 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns5.some((c) => c.name === "data_erased_at")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN data_erased_at TEXT");
 }
 
 module.exports = db;

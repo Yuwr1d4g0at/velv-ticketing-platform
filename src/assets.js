@@ -15,6 +15,22 @@ const FIELDS = [
   "notes",
 ];
 
+// For readable audit-trail lines - "Status changed..." rather than
+// "status changed...".
+const FIELD_LABELS = {
+  name: "Name",
+  asset_tag: "Asset tag",
+  category: "Category",
+  status: "Status",
+  assigned_to_name: "Assigned to",
+  location: "Location",
+  serial_number: "Serial number",
+  vendor: "Vendor",
+  purchase_date: "Purchase date",
+  warranty_expires: "Warranty expiry",
+  notes: "Notes",
+};
+
 // Not retired/lost - the set worth offering on the public request form and
 // as the default assignment target. Retired/Lost assets still exist (never
 // deleted) and are still reachable/editable from the dashboard, just not
@@ -62,8 +78,14 @@ function normalize(fields) {
   return out;
 }
 
-// Returns { error } on validation failure, or { id } on success.
-function create(fields) {
+function logActivity(assetId, agentId, body) {
+  db.prepare(`INSERT INTO asset_activity (asset_id, agent_id, body) VALUES (?, ?, ?)`).run(assetId, agentId, body);
+}
+
+// Returns { error } on validation failure, or { id } on success. agentId may
+// be null (e.g. the seed script has no logged-in agent) - asset_activity's
+// agent_id is nullable for exactly that reason.
+function create(fields, agentId = null) {
   const values = normalize(fields);
   if (!values.name) return { error: "Name is required." };
   if (!ASSET_CATEGORIES.includes(values.category)) return { error: "Choose a valid category." };
@@ -79,10 +101,16 @@ function create(fields) {
        VALUES (@name, @asset_tag, @category, @status, @assigned_to_name, @location, @serial_number, @vendor, @purchase_date, @warranty_expires, @notes)`
     )
     .run({ ...values, status: values.status || "In Use" });
+  logActivity(result.lastInsertRowid, agentId, "Asset created.");
   return { id: result.lastInsertRowid };
 }
 
-function update(id, fields) {
+// Diffs the incoming values against what's currently stored and logs one
+// readable line per field that actually changed - a save that changes
+// nothing logs nothing, and a save that changes three fields logs three
+// distinct lines rather than one opaque "asset updated".
+function update(id, fields, agentId = null) {
+  const before = get(id);
   const values = normalize(fields);
   if (!values.name) return { error: "Name is required." };
   if (!ASSET_CATEGORIES.includes(values.category)) return { error: "Choose a valid category." };
@@ -100,6 +128,16 @@ function update(id, fields) {
        notes = @notes, updated_at = datetime('now')
      WHERE id = @id`
   ).run({ ...values, id });
+
+  if (before) {
+    for (const key of FIELDS) {
+      if ((before[key] || null) === (values[key] || null)) continue;
+      const label = FIELD_LABELS[key];
+      const from = before[key] || "(empty)";
+      const to = values[key] || "(empty)";
+      logActivity(id, agentId, key === "notes" ? "Notes updated." : `${label} changed from "${from}" to "${to}".`);
+    }
+  }
   return { id };
 }
 
@@ -112,4 +150,16 @@ function ticketsForAsset(assetId) {
     .all(assetId);
 }
 
-module.exports = { assignable, all, get, create, update, ticketsForAsset };
+function activityForAsset(assetId) {
+  return db
+    .prepare(
+      `SELECT asset_activity.*, agents.name AS agent_name
+       FROM asset_activity
+       LEFT JOIN agents ON agents.id = asset_activity.agent_id
+       WHERE asset_id = ?
+       ORDER BY created_at ASC`
+    )
+    .all(assetId);
+}
+
+module.exports = { assignable, all, get, create, update, ticketsForAsset, activityForAsset };

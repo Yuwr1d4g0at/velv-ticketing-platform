@@ -83,6 +83,23 @@
         <button type="submit" class="button-primary">Save changes</button>
       </form>
     </div>
+
+    <div class="card">
+      <h2>Activity</h2>
+      <ul class="activity-feed">
+        <% if (!activity.length) { %>
+          <li class="muted">No activity yet.</li>
+        <% } %>
+        <% activity.forEach(function(a) { %>
+          <li class="activity-item">
+            <div class="activity-meta">
+              <strong><%= a.agent_name || 'System' %></strong> &middot; <%= a.created_at %>
+            </div>
+            <div class="activity-body"><%= a.body %></div>
+          </li>
+        <% }) %>
+      </ul>
+    </div>
   </div>
 
   <div class="ticket-side">

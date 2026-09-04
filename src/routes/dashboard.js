@@ -5,14 +5,17 @@ const bcrypt = require("bcryptjs");
 const db = require("../db");
 const { requireAgent } = require("../middleware/auth");
 const { verifyCsrf } = require("../middleware/csrf");
-const { CATEGORIES, PRIORITIES, STATUSES, ASSET_CATEGORIES, ASSET_STATUSES, AGING_DAYS_BY_PRIORITY, PAGE_SIZE } = require("../constants");
+const { CATEGORIES, PRIORITIES, STATUSES, ASSET_CATEGORIES, ASSET_STATUSES, PAGE_SIZE } = require("../constants");
+const { AGING_EXPR, isAgingTicket } = require("../aging");
 const { sendStatusChangeEmail, sendResolvedEmail, sendReplyEmail } = require("../mailer");
 const { toCsv } = require("../csv");
 const { addTagToTicket, removeTagFromTicket, tagsForTicket, allTags } = require("../tags");
 const canned = require("../canned-responses");
 const assets = require("../assets");
+const { exportRequesterData, eraseRequesterData } = require("../privacy");
 const {
   ATTACHMENTS_DIR,
+  SAFE_PREVIEW_TYPES,
   handleUpload,
   saveAttachments,
   deleteUploadedFiles,
@@ -27,17 +30,6 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 router.use(requireAgent);
 
-// Mirrors the AGING_EXPR SQL predicate used on the list/CSV queries below,
-// for the one place (the ticket detail header) that already has a plain
-// ticket row in hand and doesn't need a whole extra query for it.
-function isAgingTicket(ticket) {
-  if (!["Open", "In Progress"].includes(ticket.status)) return false;
-  const created = new Date(`${ticket.created_at.replace(" ", "T")}Z`);
-  const ageDays = (Date.now() - created.getTime()) / (1000 * 60 * 60 * 24);
-  const threshold = AGING_DAYS_BY_PRIORITY[ticket.priority] ?? AGING_DAYS_BY_PRIORITY.Low;
-  return ageDays > threshold;
-}
-
 function getTicketOr404(res, id) {
   const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(id);
   if (!ticket) {
@@ -45,6 +37,20 @@ function getTicketOr404(res, id) {
     return null;
   }
   return ticket;
+}
+
+// Turns free-text search input into a safe FTS5 MATCH expression. Each
+// whitespace-separated token becomes a quoted-literal prefix search
+// ("token"*) - wrapping in quotes means embedded FTS operators/punctuation
+// in the user's own input are always treated as literal text, never query
+// syntax, and the trailing * gives prefix matching ("keyb" finds
+// "keyboard"). Adjacent quoted terms AND together by default, so a
+// multi-word search requires every word to appear somewhere in the ticket,
+// not just as one exact contiguous phrase like the old LIKE-based search did.
+function buildFtsQuery(q) {
+  const tokens = q.match(/[\p{L}\p{N}]+/gu) || [];
+  if (!tokens.length) return null;
+  return tokens.map((t) => `"${t}"*`).join(" ");
 }
 
 // Shared by the ticket list, its pagination count, and the CSV export, so the
@@ -80,21 +86,19 @@ function buildTicketFilter(query, agentId) {
     params.push(tag.trim());
   }
   if (q.trim()) {
-    where += " AND (tickets.subject LIKE ? OR tickets.requester_name LIKE ? OR tickets.requester_email LIKE ?)";
+    const ftsQuery = buildFtsQuery(q);
     const like = `%${q.trim()}%`;
-    params.push(like, like, like);
+    if (ftsQuery) {
+      where += ` AND (tickets.id IN (SELECT rowid FROM tickets_fts WHERE tickets_fts MATCH ?) OR tickets.requester_name LIKE ? OR tickets.requester_email LIKE ?)`;
+      params.push(ftsQuery, like, like);
+    } else {
+      where += " AND (tickets.requester_name LIKE ? OR tickets.requester_email LIKE ?)";
+      params.push(like, like);
+    }
   }
 
   return { where, params, filters: { status, priority, category, assigned, tag, q } };
 }
-
-// AGING_DAYS_BY_PRIORITY is a fixed constant (never user input), so inlining
-// its values is safe - same as the fixed status/priority labels already
-// inlined in ORDER BY below.
-const AGING_THRESHOLD_CASE = `CASE tickets.priority ${Object.entries(AGING_DAYS_BY_PRIORITY)
-  .map(([priority, days]) => `WHEN '${priority}' THEN ${days}`)
-  .join(" ")} ELSE ${AGING_DAYS_BY_PRIORITY.Low} END`;
-const AGING_EXPR = `(tickets.status IN ('Open', 'In Progress') AND (julianday('now') - julianday(tickets.created_at)) > ${AGING_THRESHOLD_CASE})`;
 
 router.get("/", (req, res) => {
   const { where, params, filters } = buildTicketFilter(req.query, req.session.agentId);
@@ -149,6 +153,10 @@ router.get("/", (req, res) => {
     )
     .get();
 
+  const exportQuery = new URLSearchParams(
+    Object.fromEntries(Object.entries(filters).filter(([, v]) => v))
+  ).toString();
+
   res.render("dashboard/home", {
     title: "Dashboard",
     tickets,
@@ -164,10 +172,32 @@ router.get("/", (req, res) => {
     page,
     totalPages,
     totalCount,
-    exportQuery: new URLSearchParams(
-      Object.fromEntries(Object.entries(filters).filter(([, v]) => v))
-    ).toString(),
+    exportQuery,
+    savedViews: db.prepare("SELECT * FROM saved_views WHERE agent_id = ? ORDER BY created_at DESC").all(req.session.agentId),
   });
+});
+
+// A saved view is just the current filter combo (not the page number - that
+// wouldn't make sense to replay) under a name, scoped to whoever saved it.
+router.post("/views", verifyCsrf, (req, res) => {
+  const name = (req.body.name || "").trim().slice(0, 100);
+  const queryString = (req.body.query_string || "").slice(0, 1000);
+  if (name) {
+    db.prepare("INSERT INTO saved_views (agent_id, name, query_string) VALUES (?, ?, ?)").run(
+      req.session.agentId,
+      name,
+      queryString
+    );
+  }
+  res.redirect(queryString ? `/dashboard?${queryString}` : "/dashboard");
+});
+
+// Scoped to the requesting agent - unlike tickets/assets, a saved view is a
+// personal convenience, not a shared team resource, so one agent shouldn't
+// be able to delete another's.
+router.post("/views/:id/delete", verifyCsrf, (req, res) => {
+  db.prepare("DELETE FROM saved_views WHERE id = ? AND agent_id = ?").run(req.params.id, req.session.agentId);
+  res.redirect("/dashboard");
 });
 
 router.get("/export.csv", (req, res) => {
@@ -205,6 +235,15 @@ router.get("/tickets/:id", (req, res) => {
   const ticket = getTicketOr404(res, req.params.id);
   if (!ticket) return;
 
+  // A merged-away ticket has nothing left to show on its own page - all of
+  // its activity/attachments/tags moved to the target when it was merged
+  // (see /tickets/:id/merge below). Land the agent on the actually-active
+  // ticket instead of a dead end, with a one-time banner naming where they
+  // came from.
+  if (ticket.merged_into_id) {
+    return res.redirect(`/dashboard/tickets/${ticket.merged_into_id}?merged_from=${ticket.id}`);
+  }
+
   // LEFT JOIN, not JOIN: a 'requester_reply' row has no agent_id at all (the
   // requester isn't an agent), and an INNER JOIN would silently drop those
   // rows from the feed entirely instead of just showing no agent name.
@@ -225,15 +264,25 @@ router.get("/tickets/:id", (req, res) => {
   const agents = db
     .prepare("SELECT id, name FROM agents WHERE active = 1 OR id = ? ORDER BY name")
     .all(ticket.assigned_to);
-  const attachments = attachmentsForTicket(ticket.id).map((a) => ({ ...a, size_label: formatSize(a.size_bytes) }));
+  const attachments = attachmentsForTicket(ticket.id).map((a) => ({
+    ...a,
+    size_label: formatSize(a.size_bytes),
+    is_previewable: SAFE_PREVIEW_TYPES.has(a.mime_type),
+  }));
   const rating = db.prepare("SELECT rating, comment FROM ticket_ratings WHERE ticket_id = ?").get(ticket.id);
-  const otherTickets = db
-    .prepare(
-      `SELECT id, subject, status, created_at FROM tickets
-       WHERE requester_email = ? AND id != ?
-       ORDER BY created_at DESC`
-    )
-    .all(ticket.requester_email, ticket.id);
+  // Skipped once this ticket's own data has been erased - its requester_email
+  // is now the same shared redaction placeholder every erased ticket gets,
+  // so matching on it would incorrectly group unrelated erased requesters
+  // together under "from this requester".
+  const otherTickets = ticket.data_erased_at
+    ? []
+    : db
+        .prepare(
+          `SELECT id, subject, status, created_at FROM tickets
+           WHERE requester_email = ? AND id != ?
+           ORDER BY created_at DESC`
+        )
+        .all(ticket.requester_email, ticket.id);
 
   res.render("dashboard/ticket", {
     title: `Ticket #${ticket.id}`,
@@ -253,7 +302,99 @@ router.get("/tickets/:id", (req, res) => {
     priorities: PRIORITIES,
     uploadHint: LIMITS_HINT,
     noteError: null,
+    mergedFrom: req.query.merged_from ? parseInt(req.query.merged_from, 10) : null,
   });
+});
+
+// Moves all activity/attachments/tags onto the target ticket, closes this
+// one, and points it at the target via merged_into_id - see the redirect at
+// the top of GET /tickets/:id above for what happens when anyone visits a
+// merged ticket's own URL afterward. All-or-nothing in one transaction.
+router.post("/tickets/:id/merge", verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(res, req.params.id);
+  if (!ticket) return;
+
+  const targetId = parseInt(req.body.target_ticket_id, 10);
+  if (!targetId || targetId === ticket.id) {
+    return res.status(400).render("error", { title: "Invalid merge", message: "Enter a different, valid ticket number to merge into." });
+  }
+  if (ticket.merged_into_id) {
+    return res.status(400).render("error", { title: "Invalid merge", message: "This ticket has already been merged." });
+  }
+  const target = db.prepare("SELECT * FROM tickets WHERE id = ?").get(targetId);
+  if (!target) {
+    return res.status(400).render("error", { title: "Invalid merge", message: "That target ticket does not exist." });
+  }
+  if (target.merged_into_id) {
+    return res.status(400).render("error", {
+      title: "Invalid merge",
+      message: "That target ticket has itself been merged elsewhere - merge into its final destination instead.",
+    });
+  }
+
+  db.exec("BEGIN");
+  try {
+    db.prepare("UPDATE ticket_activity SET ticket_id = ? WHERE ticket_id = ?").run(target.id, ticket.id);
+    db.prepare("UPDATE attachments SET ticket_id = ? WHERE ticket_id = ?").run(target.id, ticket.id);
+    db.prepare(
+      "INSERT OR IGNORE INTO ticket_tags (ticket_id, tag_id) SELECT ?, tag_id FROM ticket_tags WHERE ticket_id = ?"
+    ).run(target.id, ticket.id);
+    db.prepare("DELETE FROM ticket_tags WHERE ticket_id = ?").run(ticket.id);
+    db.prepare(`INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'note', ?)`).run(
+      target.id,
+      req.session.agentId,
+      `Merged ticket #${ticket.id} ("${ticket.subject}") into this one.`
+    );
+    db.prepare(
+      "UPDATE tickets SET merged_into_id = ?, status = 'Closed', updated_at = datetime('now') WHERE id = ?"
+    ).run(target.id, ticket.id);
+    db.prepare("UPDATE tickets SET updated_at = datetime('now') WHERE id = ?").run(target.id);
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+
+  res.redirect(`/dashboard/tickets/${target.id}`);
+});
+
+// Agent-side inline preview for a safe image attachment - never PDF/TXT/CSV,
+// see SAFE_PREVIEW_TYPES. Everything else still only ever force-downloads.
+router.get("/tickets/:id/attachments/:attachmentId/preview", (req, res) => {
+  const ticket = getTicketOr404(res, req.params.id);
+  if (!ticket) return;
+
+  const attachment = getAttachment(ticket.id, req.params.attachmentId);
+  if (!attachment || !SAFE_PREVIEW_TYPES.has(attachment.mime_type)) {
+    return res.status(404).render("error", { title: "Not found", message: "No preview is available for that attachment." });
+  }
+  res.setHeader("Content-Type", attachment.mime_type);
+  res.setHeader("Content-Disposition", "inline");
+  res.sendFile(path.join(ATTACHMENTS_DIR, attachment.stored_name));
+});
+
+// GDPR export/erasure, scoped to this ticket's requester email and reachable
+// from the ticket detail page's "Requester data" card - there's no requester
+// login system in this app, so both are agent-initiated, not self-service.
+router.get("/tickets/:id/privacy/export.json", (req, res) => {
+  const ticket = getTicketOr404(res, req.params.id);
+  if (!ticket) return;
+
+  const bundle = exportRequesterData(ticket.requester_email);
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="requester-data-${ticket.id}-${Date.now()}.json"`);
+  res.send(JSON.stringify(bundle, null, 2));
+});
+
+router.post("/tickets/:id/privacy/erase", verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(res, req.params.id);
+  if (!ticket) return;
+
+  const result = eraseRequesterData(ticket.requester_email);
+  if (result.error) {
+    return res.status(400).render("error", { title: "Erasure failed", message: result.error });
+  }
+  res.redirect(`/dashboard/tickets/${ticket.id}`);
 });
 
 router.post("/tickets/:id/asset", verifyCsrf, (req, res) => {
@@ -296,7 +437,13 @@ router.post("/tickets/:id/tags/:tagId/remove", verifyCsrf, (req, res) => {
 function applyStatusChange(ticket, status, agentId) {
   if (!STATUSES.includes(status) || status === ticket.status) return;
 
-  db.prepare("UPDATE tickets SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, ticket.id);
+  // Reopening clears any past SLA alert - a ticket that breaches, gets
+  // fixed, and later reopens should be able to alert again rather than
+  // staying silenced forever because it alerted once in a previous life.
+  const reopening = ["Open", "In Progress"].includes(status) && ["Resolved", "Closed"].includes(ticket.status);
+  db.prepare(
+    `UPDATE tickets SET status = ?, updated_at = datetime('now')${reopening ? ", sla_alerted_at = NULL" : ""} WHERE id = ?`
+  ).run(status, ticket.id);
   db.prepare(
     `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'status_change', ?)`
   ).run(ticket.id, agentId, `Status changed from "${ticket.status}" to "${status}".`);
@@ -524,19 +671,21 @@ router.post("/canned-responses/:id/delete", verifyCsrf, (req, res) => {
 
 router.get("/assets", (req, res) => {
   const { status = "", category = "", q = "" } = req.query;
+  const filters = { status, category, q };
   res.render("dashboard/assets", {
     title: "Assets",
-    items: assets.all({ status, category, q }),
-    filters: { status, category, q },
+    items: assets.all(filters),
+    filters,
     categories: ASSET_CATEGORIES,
     statuses: ASSET_STATUSES,
     values: {},
     error: null,
+    exportQuery: new URLSearchParams(Object.fromEntries(Object.entries(filters).filter(([, v]) => v))).toString(),
   });
 });
 
 router.post("/assets", verifyCsrf, (req, res) => {
-  const result = assets.create(req.body);
+  const result = assets.create(req.body, req.session.agentId);
   if (result.error) {
     return res.status(400).render("dashboard/assets", {
       title: "Assets",
@@ -546,9 +695,32 @@ router.post("/assets", verifyCsrf, (req, res) => {
       statuses: ASSET_STATUSES,
       values: req.body,
       error: result.error,
+      exportQuery: "",
     });
   }
   res.redirect(`/dashboard/assets/${result.id}`);
+});
+
+// Mirrors /dashboard/export.csv for tickets. Defined before /assets/:id so
+// Express doesn't match "export.csv" as an :id first.
+router.get("/assets/export.csv", (req, res) => {
+  const { status = "", category = "", q = "" } = req.query;
+  const csv = toCsv(assets.all({ status, category, q }), [
+    { key: "id", header: "ID" },
+    { key: "name", header: "Name" },
+    { key: "asset_tag", header: "Asset tag" },
+    { key: "category", header: "Category" },
+    { key: "status", header: "Status" },
+    { key: "assigned_to_name", header: "Assigned to" },
+    { key: "location", header: "Location" },
+    { key: "serial_number", header: "Serial number" },
+    { key: "vendor", header: "Vendor" },
+    { key: "purchase_date", header: "Purchase date" },
+    { key: "warranty_expires", header: "Warranty expiry" },
+  ]);
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="assets-${Date.now()}.csv"`);
+  res.send(csv);
 });
 
 router.get("/assets/:id", (req, res) => {
@@ -560,6 +732,7 @@ router.get("/assets/:id", (req, res) => {
     title: asset.name,
     asset,
     tickets: assets.ticketsForAsset(asset.id),
+    activity: assets.activityForAsset(asset.id),
     categories: ASSET_CATEGORIES,
     statuses: ASSET_STATUSES,
     error: null,
@@ -571,12 +744,13 @@ router.post("/assets/:id", verifyCsrf, (req, res) => {
   if (!asset) {
     return res.status(404).render("error", { title: "Not found", message: "That asset does not exist." });
   }
-  const result = assets.update(asset.id, req.body);
+  const result = assets.update(asset.id, req.body, req.session.agentId);
   if (result.error) {
     return res.status(400).render("dashboard/asset", {
       title: asset.name,
       asset: { ...asset, ...req.body },
       tickets: assets.ticketsForAsset(asset.id),
+      activity: assets.activityForAsset(asset.id),
       categories: ASSET_CATEGORIES,
       statuses: ASSET_STATUSES,
       error: result.error,

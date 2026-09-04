@@ -304,6 +304,13 @@ hr { border: none; border-top: 1px solid var(--border-subtle); margin: var(--spa
 [data-theme="dark"] .link-button:hover { background: rgba(255, 255, 255, 0.08); }
 .inline-form { display: inline; }
 
+/* ---- Language toggle (public pages only) ---- */
+.lang-toggle { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--fs-caption); font-weight: var(--fw-medium); }
+.lang-toggle a { color: var(--text-muted); text-decoration: none; padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); }
+.lang-toggle a:hover { background: var(--bg-subtle); }
+.lang-toggle a.is-active { color: var(--text-strong); background: var(--velv-purple-050); }
+[data-theme="dark"] .lang-toggle a.is-active { background: rgba(130, 118, 241, 0.2); }
+
 /* ---- Lights toggle ---- */
 .lights-toggle { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; user-select: none; }
 .lights-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
@@ -412,6 +419,7 @@ hr { border: none; border-top: 1px solid var(--border-subtle); margin: var(--spa
    ============================================================ */
 .stacked-form { display: flex; flex-direction: column; gap: var(--space-1); max-width: 520px; }
 .stacked-form label {
+  display: block;
   font-weight: var(--fw-medium);
   font-size: var(--fs-body-sm);
   color: var(--text-strong);
@@ -420,6 +428,8 @@ hr { border: none; border-top: 1px solid var(--border-subtle); margin: var(--spa
 .stacked-form input,
 .stacked-form select,
 .stacked-form textarea {
+  display: block;
+  width: 100%;
   padding: 0 var(--space-4);
   height: 46px;
   border: 1px solid var(--border-default);
@@ -475,6 +485,86 @@ select {
 [data-theme="dark"] select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239E9CC2' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
 }
+
+/* ============================================================
+   Public form layouts — two-column split
+   A narrower "aside" column (who/what-it's-about) next to a wider
+   "main" column (the actual message/content), used by the request
+   form and the ticket-status page. Always collapses to one column
+   below 800px - there's no room for two on a phone.
+   ============================================================ */
+.card-wide { max-width: 880px; margin-left: auto; margin-right: auto; }
+
+.split-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 280px) 1fr;
+  gap: var(--space-6) var(--space-7);
+  align-items: start;
+}
+.split-legend {
+  font-size: var(--fs-overline);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-overline);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-3);
+}
+@media (max-width: 800px) {
+  .split-layout { grid-template-columns: 1fr; }
+}
+
+/* A <form class="stacked-form split-layout"> needs the grid to win over
+   .stacked-form's own flex/max-width - the field styling underneath
+   (label/input/select/textarea) still applies via .stacked-form's
+   descendant selectors regardless of the form's own display mode. */
+form.split-layout.stacked-form { display: grid; max-width: none; }
+.split-layout-actions { grid-column: 1 / -1; margin-top: var(--space-2); }
+
+/* Split-panel auth shell: a permanently-dark brand panel (like the
+   footer, deliberately theme-invariant) beside the actual form. */
+.auth-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  max-width: 860px;
+  margin: var(--space-6) auto 0;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-md);
+}
+.auth-split-brand {
+  background: var(--velv-night);
+  color: #fff;
+  padding: var(--space-7) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-4);
+}
+.auth-split-brand img { height: 26px; width: auto; }
+.auth-split-brand h2 { color: #fff; margin: 0; }
+.auth-split-brand p { color: rgba(255, 255, 255, 0.75); margin: 0; max-width: 30ch; }
+.auth-split-form {
+  background: var(--surface-card);
+  padding: var(--space-7) var(--space-6);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+@media (max-width: 800px) {
+  .auth-split { grid-template-columns: 1fr; margin-top: 0; }
+  .auth-split-brand { display: none; }
+}
+
+/* The ticket-status lookup form stays a focused, narrow moment even
+   though its card widens to fit two columns once a ticket is found.
+   text-align: center reaches the heading/copy and the inline-flex
+   card-icon; the form itself just fills the narrow wrapper's width. */
+.status-lookup { max-width: 420px; margin: 0 auto; text-align: center; }
+.status-lookup .stacked-form { text-align: left; }
+
+.icon-search { -webkit-mask-image: url("/icons/search.svg"); mask-image: url("/icons/search.svg"); }
+.icon-send { -webkit-mask-image: url("/icons/send.svg"); mask-image: url("/icons/send.svg"); }
 
 /* ============================================================
    Buttons
@@ -540,6 +630,14 @@ select {
 .alert-error .icon { flex: 0 0 auto; margin-top: 2px; }
 .alert-error ul { margin: 0; padding-left: var(--space-5); }
 
+.alert-info {
+  background: var(--velv-purple-050);
+  color: var(--velv-off-black);
+  border: 1px solid var(--velv-purple-100);
+}
+[data-theme="dark"] .alert-info { background: rgba(130, 118, 241, 0.14); color: var(--text-body); border-color: rgba(130, 118, 241, 0.28); }
+.alert-info .icon { flex: 0 0 auto; margin-top: 2px; }
+
 /* ============================================================
    Definition list (ticket details)
    ============================================================ */
@@ -604,6 +702,8 @@ select {
   font-weight: var(--fw-medium);
 }
 .tag-chip form { display: inline-flex; margin: 0; }
+.tag-chip a { color: inherit; text-decoration: none; }
+.tag-chip a:hover { text-decoration: underline; }
 .tag-chip button {
   display: inline-flex;
   align-items: center;
@@ -865,7 +965,8 @@ select {
   border-radius: var(--radius-sm);
   font-size: var(--fs-body-sm);
 }
-.attachment-name { color: var(--text-strong); font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.attachment-thumb { width: 36px; height: 36px; border-radius: var(--radius-xs); object-fit: cover; flex: 0 0 auto; background: var(--border-subtle); }
+.attachment-name { flex: 1; color: var(--text-strong); font-weight: var(--fw-medium); overflow-wrap: anywhere; }
 .attachment-meta { color: var(--text-muted); font-size: var(--fs-caption); white-space: nowrap; }
 .attachment-download-form { display: inline-flex; margin: 0; }
 .attachment-download-btn {

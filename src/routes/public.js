@@ -3,10 +3,12 @@ const path = require("path");
 const rateLimit = require("express-rate-limit");
 const db = require("../db");
 const { CATEGORIES } = require("../constants");
+const { t } = require("../i18n");
 const { sendTicketCreatedEmail, sendAgentNotifiedOfReply } = require("../mailer");
 const assets = require("../assets");
 const {
   ATTACHMENTS_DIR,
+  SAFE_PREVIEW_TYPES,
   handleUpload,
   saveAttachments,
   deleteUploadedFiles,
@@ -39,9 +41,21 @@ const statusLimiter = rateLimit({
   message: "Too many status checks from this network. Please wait a few minutes and try again.",
 });
 
+// Separate, more generous limiter for inline previews: a single ticket page
+// with a few image attachments fires one request per thumbnail just by
+// being viewed, which would burn through statusLimiter's budget in one page
+// load if it shared the same counter.
+const previewLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many preview requests from this network. Please wait a few minutes and try again.",
+});
+
 router.get("/", (req, res) => {
   res.render("public/request-form", {
-    title: "Submit a request",
+    title: t(req.lang, "submit_request_title"),
     categories: CATEGORIES,
     assets: assets.assignable(),
     errors: [],
@@ -63,26 +77,26 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
   const values = { requester_name, requester_email, category, subject, description, asset_id };
   const errors = [];
 
-  if (!requester_name.trim()) errors.push("Your name is required.");
+  if (!requester_name.trim()) errors.push(t(req.lang, "err_name_required"));
   if (!requester_email.trim() || !EMAIL_RE.test(requester_email.trim())) {
-    errors.push("A valid email address is required.");
+    errors.push(t(req.lang, "err_email_invalid"));
   }
-  if (!CATEGORIES.includes(category)) errors.push("Please choose a valid category.");
-  if (!subject.trim()) errors.push("A subject is required.");
-  if (!description.trim()) errors.push("A description is required.");
-  if (subject.length > 200) errors.push("Subject must be under 200 characters.");
-  if (description.length > 5000) errors.push("Description must be under 5000 characters.");
+  if (!CATEGORIES.includes(category)) errors.push(t(req.lang, "err_category_invalid"));
+  if (!subject.trim()) errors.push(t(req.lang, "err_subject_required"));
+  if (!description.trim()) errors.push(t(req.lang, "err_description_required"));
+  if (subject.length > 200) errors.push(t(req.lang, "err_subject_too_long"));
+  if (description.length > 5000) errors.push(t(req.lang, "err_description_too_long"));
   // Asset is optional, but if one was picked it has to be real - not just
   // any parseable integer, since this is the one field on this form a
   // client could otherwise use to link a ticket to an arbitrary asset id.
   const assetId = asset_id ? parseInt(asset_id, 10) : null;
-  if (assetId && !assets.get(assetId)) errors.push("Please choose a valid asset.");
+  if (assetId && !assets.get(assetId)) errors.push(t(req.lang, "err_asset_invalid"));
   if (req.uploadError) errors.push(req.uploadError);
 
   if (errors.length) {
     deleteUploadedFiles(req.files);
     return res.status(400).render("public/request-form", {
-      title: "Submit a request",
+      title: t(req.lang, "submit_request_title"),
       categories: CATEGORIES,
       assets: assets.assignable(),
       errors,
@@ -176,7 +190,7 @@ function conversationForTicket(ticketId) {
 
 router.get("/status", (req, res) => {
   res.render("public/status-check", {
-    title: "Check ticket status",
+    title: t(req.lang, "check_status_title"),
     ticket: null,
     attachments: [],
     conversation: [],
@@ -190,11 +204,11 @@ router.post("/status", statusLimiter, (req, res) => {
 
   if (!id || !requester_email.trim()) {
     return res.render("public/status-check", {
-      title: "Check ticket status",
+      title: t(req.lang, "check_status_title"),
       ticket: null,
       attachments: [],
       conversation: [],
-      error: "Enter both your ticket number and the email you used to submit it.",
+      error: t(req.lang, "err_status_missing_fields"),
     });
   }
 
@@ -207,18 +221,22 @@ router.post("/status", statusLimiter, (req, res) => {
 
   if (!ticket) {
     return res.render("public/status-check", {
-      title: "Check ticket status",
+      title: t(req.lang, "check_status_title"),
       ticket: null,
       attachments: [],
       conversation: [],
-      error: "No matching ticket found. Check the ticket number and email address.",
+      error: t(req.lang, "err_status_not_found"),
     });
   }
 
   res.render("public/status-check", {
-    title: "Check ticket status",
+    title: t(req.lang, "check_status_title"),
     ticket,
-    attachments: attachmentsForTicket(ticket.id, { requesterVisibleOnly: true }).map((a) => ({ ...a, size_label: formatSize(a.size_bytes) })),
+    attachments: attachmentsForTicket(ticket.id, { requesterVisibleOnly: true }).map((a) => ({
+      ...a,
+      size_label: formatSize(a.size_bytes),
+      is_previewable: SAFE_PREVIEW_TYPES.has(a.mime_type),
+    })),
     conversation: conversationForTicket(ticket.id),
     error: null,
   });
@@ -241,11 +259,15 @@ router.post("/status/reply", statusLimiter, (req, res) => {
   const body = message.trim().slice(0, 5000);
   if (!body) {
     return res.render("public/status-check", {
-      title: "Check ticket status",
+      title: t(req.lang, "check_status_title"),
       ticket,
-      attachments: attachmentsForTicket(ticket.id, { requesterVisibleOnly: true }).map((a) => ({ ...a, size_label: formatSize(a.size_bytes) })),
+      attachments: attachmentsForTicket(ticket.id, { requesterVisibleOnly: true }).map((a) => ({
+      ...a,
+      size_label: formatSize(a.size_bytes),
+      is_previewable: SAFE_PREVIEW_TYPES.has(a.mime_type),
+    })),
       conversation: conversationForTicket(ticket.id),
-      error: "Enter a message before sending.",
+      error: t(req.lang, "err_reply_empty"),
     });
   }
 
@@ -254,7 +276,7 @@ router.post("/status/reply", statusLimiter, (req, res) => {
   ).run(ticket.id, body);
 
   if (["Resolved", "Closed"].includes(ticket.status)) {
-    db.prepare("UPDATE tickets SET status = 'Open', updated_at = datetime('now') WHERE id = ?").run(ticket.id);
+    db.prepare("UPDATE tickets SET status = 'Open', updated_at = datetime('now'), sla_alerted_at = NULL WHERE id = ?").run(ticket.id);
     db.prepare(
       `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, NULL, 'status_change', ?)`
     ).run(ticket.id, `Status changed from "${ticket.status}" to "Open" (reopened by requester reply).`);
@@ -274,9 +296,13 @@ router.post("/status/reply", statusLimiter, (req, res) => {
 
   const updated = db.prepare("SELECT * FROM tickets WHERE id = ?").get(ticket.id);
   res.render("public/status-check", {
-    title: "Check ticket status",
+    title: t(req.lang, "check_status_title"),
     ticket: updated,
-    attachments: attachmentsForTicket(ticket.id, { requesterVisibleOnly: true }).map((a) => ({ ...a, size_label: formatSize(a.size_bytes) })),
+    attachments: attachmentsForTicket(ticket.id, { requesterVisibleOnly: true }).map((a) => ({
+      ...a,
+      size_label: formatSize(a.size_bytes),
+      is_previewable: SAFE_PREVIEW_TYPES.has(a.mime_type),
+    })),
     conversation: conversationForTicket(ticket.id),
     error: null,
   });
@@ -302,6 +328,29 @@ router.post("/status/attachments/:attachmentId/download", statusLimiter, (req, r
   }
 
   res.download(path.join(ATTACHMENTS_DIR, attachment.stored_name), attachment.original_name);
+});
+
+// Same ownership model as the download route above, but GET (an <img> tag
+// can't send a POST body) - ticket_id + requester_email travel as query
+// params instead. Only ever serves the narrow SAFE_PREVIEW_TYPES subset
+// inline; everything else still only ever force-downloads.
+router.get("/status/attachments/:attachmentId/preview", previewLimiter, (req, res) => {
+  const id = parseInt(req.query.ticket_id, 10);
+  const email = (req.query.requester_email || "").trim().toLowerCase();
+
+  const ticket = db.prepare("SELECT id FROM tickets WHERE id = ? AND requester_email = ?").get(id, email);
+  if (!ticket) {
+    return res.status(404).render("error", { title: "Not found", message: "That attachment does not exist." });
+  }
+
+  const attachment = getPublicAttachment(ticket.id, req.params.attachmentId);
+  if (!attachment || !SAFE_PREVIEW_TYPES.has(attachment.mime_type)) {
+    return res.status(404).render("error", { title: "Not found", message: "No preview is available for that attachment." });
+  }
+
+  res.setHeader("Content-Type", attachment.mime_type);
+  res.setHeader("Content-Disposition", "inline");
+  res.sendFile(path.join(ATTACHMENTS_DIR, attachment.stored_name));
 });
 
 // Reached via the link in the "ticket resolved" email, not a login - see the
