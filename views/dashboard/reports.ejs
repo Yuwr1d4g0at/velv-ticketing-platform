@@ -1,101 +1,80 @@
 <%- include('../partials/header') %>
-<h1>Reports</h1>
-<p class="muted">A quick read on volume and load - not a substitute for the filterable ticket list, just the trends it doesn't show at a glance.</p>
+<div class="dashboard-head">
+  <h1>Reports</h1>
+  <p class="muted">A quick read on volume and load - not a substitute for the filterable ticket list, just the trends it doesn't show at a glance.</p>
 
-<div class="stat-row">
-  <% if (firstResponseTime.count) { %>
-    <div class="stat-tile stat-tile-resolution">
-      <span class="stat-count"><%= firstResponseTime.avg_days.toFixed(1) %>d</span>
-      <span class="stat-label">Avg. time to first response &middot; <%= firstResponseTime.count %> ticket<%= firstResponseTime.count === 1 ? '' : 's' %></span>
+  <div class="stat-row">
+    <div class="stat-tile stat-tile-resolution<%= firstResponseTime.count ? '' : ' is-empty' %>">
+      <span class="stat-count"><%= firstResponseTime.count ? firstResponseTime.avg_days.toFixed(1) + 'd' : '—' %></span>
+      <span class="stat-label">Avg. time to first response<% if (firstResponseTime.count) { %> &middot; <%= firstResponseTime.count %> ticket<%= firstResponseTime.count === 1 ? '' : 's' %><% } %></span>
     </div>
-  <% } %>
-  <% if (resolutionTime.count) { %>
-    <div class="stat-tile stat-tile-resolution">
-      <span class="stat-count"><%= resolutionTime.avg_days.toFixed(1) %>d</span>
-      <span class="stat-label">Avg. time to resolve &middot; <%= resolutionTime.count %> ticket<%= resolutionTime.count === 1 ? '' : 's' %></span>
+    <div class="stat-tile stat-tile-resolution<%= resolutionTime.count ? '' : ' is-empty' %>">
+      <span class="stat-count"><%= resolutionTime.count ? resolutionTime.avg_days.toFixed(1) + 'd' : '—' %></span>
+      <span class="stat-label">Avg. time to resolve<% if (resolutionTime.count) { %> &middot; <%= resolutionTime.count %> ticket<%= resolutionTime.count === 1 ? '' : 's' %><% } %></span>
     </div>
-  <% } %>
-  <% if (reopenRate !== null) { %>
-    <div class="stat-tile stat-tile-resolution">
-      <span class="stat-count"><%= reopenRate.toFixed(0) %>%</span>
-      <span class="stat-label">Reopen rate &middot; <%= reopenedCount %> of <%= everResolvedCount %> ever-resolved ticket<%= everResolvedCount === 1 ? '' : 's' %></span>
+    <div class="stat-tile stat-tile-resolution<%= reopenRate !== null ? '' : ' is-empty' %>">
+      <span class="stat-count"><%= reopenRate !== null ? reopenRate.toFixed(0) + '%' : '—' %></span>
+      <span class="stat-label">Reopen rate<% if (reopenRate !== null) { %> &middot; <%= reopenedCount %> of <%= everResolvedCount %> ever-resolved<% } %></span>
     </div>
-  <% } %>
+  </div>
 </div>
 
-<div class="card card-wide">
-  <h2>Tickets created, last 30 days</h2>
-  <% if (volume.every(function(v) { return v.count === 0; })) { %>
-    <p class="muted">No tickets created in this window.</p>
-  <% } else { %>
-    <div class="vbar-chart" role="img" aria-label="Bar chart of tickets created per day over the last 30 days">
-      <% volume.forEach(function(v) { %>
-        <div class="vbar-col" title="<%= v.day %>: <%= v.count %>">
-          <div class="vbar-fill <%= v.barClass %>"></div>
-        </div>
-      <% }) %>
-    </div>
-    <div class="vbar-axis">
-      <span><%= volume[0].day %></span>
-      <span><%= volume[volume.length - 1].day %></span>
-    </div>
-  <% } %>
-</div>
+<div class="report-row-2">
+  <div class="card">
+    <p class="chart-eyebrow">Last 30 days</p>
+    <h2>Tickets created</h2>
+    <% if (volume.every(function(v) { return v.count === 0; })) { %>
+      <div class="chart-empty">
+        <span class="icon icon-inbox"></span>
+        <p>No tickets created in this window.</p>
+      </div>
+    <% } else { %>
+      <div class="vbar-chart" role="img" aria-label="Bar chart of tickets created per day over the last 30 days">
+        <% volume.forEach(function(v) { %>
+          <div class="vbar-col chart-tip" data-tip="<%= v.day %>: <%= v.count %> ticket<%= v.count === 1 ? '' : 's' %>">
+            <div class="vbar-fill <%= v.barClass %>"></div>
+          </div>
+        <% }) %>
+      </div>
+      <div class="vbar-axis">
+        <span><%= volume[0].day %></span>
+        <span><%= volume[volume.length - 1].day %></span>
+      </div>
+    <% } %>
+  </div>
 
-<div class="card card-wide">
-  <h2>Satisfaction trend</h2>
-  <% if (!csatTrend.length) { %>
-    <p class="muted">No ratings yet.</p>
-  <% } else { %>
-    <div class="vbar-chart" role="img" aria-label="Bar chart of average satisfaction rating by month">
-      <% csatTrend.forEach(function(m) { %>
-        <div class="vbar-col" title="<%= m.month %>: <%= m.avg_rating.toFixed(1) %>/5 (<%= m.count %> rating<%= m.count === 1 ? '' : 's' %>)">
-          <div class="vbar-fill <%= m.barClass %>"></div>
-        </div>
-      <% }) %>
-    </div>
-    <div class="vbar-axis">
-      <span><%= csatTrend[0].month %></span>
-      <span><%= csatTrend[csatTrend.length - 1].month %></span>
-    </div>
-  <% } %>
-</div>
-
-<div class="card card-wide">
-  <h2>Agent performance</h2>
-  <% if (!agentPerformance.length) { %>
-    <p class="muted">No active agents.</p>
-  <% } else { %>
-    <div class="table-wrap">
-      <table class="ticket-table">
-        <thead>
-          <tr>
-            <th scope="col">Agent</th>
-            <th scope="col">Resolved</th>
-            <th scope="col">Avg. resolution time</th>
-            <th scope="col">Avg. CSAT</th>
-          </tr>
-        </thead>
-        <tbody>
-          <% agentPerformance.forEach(function(a) { %>
-            <tr>
-              <td><%= a.name %></td>
-              <td><%= a.resolved_count %></td>
-              <td><% if (a.avg_resolution_days != null) { %><%= a.avg_resolution_days.toFixed(1) %>d<% } else { %>&mdash;<% } %></td>
-              <td><% if (a.avg_csat != null) { %><%= a.avg_csat.toFixed(1) %>/5<% } else { %>&mdash;<% } %></td>
-            </tr>
-          <% }) %>
-        </tbody>
-      </table>
-    </div>
-  <% } %>
+  <div class="card">
+    <p class="chart-eyebrow">By month</p>
+    <h2>Satisfaction trend</h2>
+    <% if (!csatTrend.length) { %>
+      <div class="chart-empty">
+        <span class="icon icon-star"></span>
+        <p>No ratings yet.</p>
+      </div>
+    <% } else { %>
+      <div class="vbar-chart" role="img" aria-label="Bar chart of average satisfaction rating by month">
+        <% csatTrend.forEach(function(m) { %>
+          <div class="vbar-col chart-tip" data-tip="<%= m.month %>: <%= m.avg_rating.toFixed(1) %>/5 (<%= m.count %> rating<%= m.count === 1 ? '' : 's' %>)">
+            <div class="vbar-fill <%= m.barClass %>"></div>
+          </div>
+        <% }) %>
+      </div>
+      <div class="vbar-axis">
+        <span><%= csatTrend[0].month %></span>
+        <span><%= csatTrend[csatTrend.length - 1].month %></span>
+      </div>
+    <% } %>
+  </div>
 </div>
 
 <div class="report-grid">
   <div class="card">
     <h2>By category</h2>
     <% if (!byCategory.length) { %>
-      <p class="muted">No tickets yet.</p>
+      <div class="chart-empty">
+        <span class="icon icon-inbox"></span>
+        <p>No tickets yet.</p>
+      </div>
     <% } else { %>
       <div class="hbar-chart">
         <% byCategory.forEach(function(r) { %>
@@ -112,7 +91,10 @@
   <div class="card">
     <h2>By status</h2>
     <% if (!byStatus.length) { %>
-      <p class="muted">No tickets yet.</p>
+      <div class="chart-empty">
+        <span class="icon icon-inbox"></span>
+        <p>No tickets yet.</p>
+      </div>
     <% } else { %>
       <div class="hbar-chart">
         <% byStatus.forEach(function(r) { %>
@@ -127,10 +109,13 @@
   </div>
 
   <div class="card">
-    <h2>Current workload by agent</h2>
-    <p class="muted">Open + In Progress tickets.</p>
+    <h2>Current workload</h2>
+    <p class="muted">Open + In Progress tickets, by agent.</p>
     <% if (!byAgent.length) { %>
-      <p class="muted">Nothing open right now.</p>
+      <div class="chart-empty">
+        <span class="icon icon-inbox"></span>
+        <p>Nothing open right now.</p>
+      </div>
     <% } else { %>
       <div class="hbar-chart">
         <% byAgent.forEach(function(r) { %>
@@ -144,4 +129,32 @@
     <% } %>
   </div>
 </div>
+
+<h2>Agent performance</h2>
+<% if (!agentPerformance.length) { %>
+  <p class="muted">No active agents.</p>
+<% } else { %>
+  <div class="table-wrap">
+    <table class="ticket-table">
+      <thead>
+        <tr>
+          <th scope="col">Agent</th>
+          <th scope="col">Resolved</th>
+          <th scope="col">Avg. resolution time</th>
+          <th scope="col">Avg. CSAT</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% agentPerformance.forEach(function(a) { %>
+          <tr>
+            <td><%= a.name %></td>
+            <td><%= a.resolved_count %></td>
+            <td><% if (a.avg_resolution_days != null) { %><%= a.avg_resolution_days.toFixed(1) %>d<% } else { %>&mdash;<% } %></td>
+            <td><% if (a.avg_csat != null) { %><%= a.avg_csat.toFixed(1) %>/5<% } else { %>&mdash;<% } %></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
 <%- include('../partials/footer') %>

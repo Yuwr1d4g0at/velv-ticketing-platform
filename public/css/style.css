@@ -225,6 +225,7 @@ hr { border: none; border-top: 1px solid var(--border-subtle); margin: var(--spa
 .icon-download { -webkit-mask-image: url("/icons/download.svg"); mask-image: url("/icons/download.svg"); }
 .icon-bell { -webkit-mask-image: url("/icons/bell.svg"); mask-image: url("/icons/bell.svg"); }
 .icon-star { -webkit-mask-image: url("/icons/star.svg"); mask-image: url("/icons/star.svg"); }
+.icon-inbox { -webkit-mask-image: url("/icons/inbox.svg"); mask-image: url("/icons/inbox.svg"); }
 
 /* ============================================================
    Header
@@ -1128,22 +1129,109 @@ form.split-layout.stacked-form { display: grid; max-width: none; }
    chart here compares a single count across categories, not multiple
    overlapping series, so there's no need for a multi-hue categorical scheme.
    ============================================================ */
-.report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-5); align-items: start; }
+.report-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); align-items: stretch; margin-bottom: var(--space-5); }
+@media (max-width: 900px) {
+  .report-row-2 { grid-template-columns: 1fr; }
+}
+
+.report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-5); align-items: stretch; }
 @media (max-width: 900px) {
   .report-grid { grid-template-columns: 1fr; }
 }
+.report-row-2 .card,
+.report-grid .card { margin-bottom: 0; display: flex; flex-direction: column; }
 
-.vbar-chart { display: flex; align-items: flex-end; gap: 3px; height: 140px; }
-.vbar-col { flex: 1; height: 100%; display: flex; align-items: flex-end; }
-.vbar-fill { width: 100%; background: var(--velv-electric); border-radius: 3px 3px 0 0; min-height: 2px; }
+.chart-eyebrow {
+  font-size: var(--fs-overline);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-overline);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-1);
+}
+
+.vbar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 160px;
+  /* A faint 25/50/75/100% reference grid, drawn as a background rather than
+     extra markup - keeps bar heights readable without a numeric y-axis. */
+  background-image: repeating-linear-gradient(
+    0deg,
+    var(--border-subtle) 0,
+    var(--border-subtle) 1px,
+    transparent 1px,
+    transparent 25%
+  );
+}
+.vbar-col { flex: 1; height: 100%; display: flex; align-items: flex-end; cursor: default; }
+.vbar-fill {
+  width: 100%;
+  background: var(--velv-electric);
+  border-radius: 4px 4px 0 0;
+  min-height: 3px;
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+.vbar-col:hover .vbar-fill { filter: brightness(0.82); }
+[data-theme="dark"] .vbar-col:hover .vbar-fill { filter: brightness(1.25); }
 .vbar-axis { display: flex; justify-content: space-between; margin-top: var(--space-2); font-size: var(--fs-caption); color: var(--text-muted); }
 
-.hbar-chart { display: flex; flex-direction: column; gap: var(--space-3); }
-.hbar-row { display: grid; grid-template-columns: 120px 1fr 32px; align-items: center; gap: var(--space-3); }
+.hbar-chart { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; justify-content: center; }
+.hbar-row { display: grid; grid-template-columns: 120px 1fr 32px; align-items: center; gap: var(--space-3); padding: var(--space-1) 0; border-radius: var(--radius-xs); transition: background var(--dur-fast) var(--ease-out); }
+.hbar-row:hover { background: var(--bg-subtle); }
 .hbar-label { font-size: var(--fs-body-sm); color: var(--text-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hbar-track { height: 10px; background: var(--bg-subtle); border-radius: var(--radius-pill); overflow: hidden; }
 .hbar-fill { display: block; height: 100%; background: var(--velv-electric); border-radius: var(--radius-pill); }
 .hbar-value { font-size: var(--fs-caption); color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Hover tooltip for individual chart marks (vbar columns): the text comes
+   from a data-tip attribute via CSS attr(), so - like the bar-w-*/bar-h-*
+   classes above - no per-request inline style is ever generated. Deliberately
+   theme-invariant (a dark chip in either theme), same idea as the auth-split
+   brand panel or the footer. */
+.chart-tip { position: relative; }
+.chart-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--velv-off-black);
+  color: #fff;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-out);
+  box-shadow: var(--shadow-md);
+  z-index: 5;
+}
+.chart-tip:hover::after { opacity: 1; visibility: visible; }
+
+/* A no-data placeholder sized to fill the same card real estate a populated
+   chart would - keeps a paired-up row (e.g. the two report-row-2 cards)
+   from looking lopsided when one side has data and the other doesn't. */
+.chart-empty {
+  flex: 1;
+  min-height: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  text-align: center;
+}
+.chart-empty .icon { width: 28px; height: 28px; opacity: 0.6; }
+.chart-empty p { margin: 0; }
+
+.stat-tile.is-empty { opacity: 0.55; }
+.stat-tile.is-empty .stat-count { color: var(--text-muted); font-weight: var(--fw-medium); }
 
 
 .bar-w-0 { width: 0%; }
