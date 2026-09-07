@@ -1,0 +1,20 @@
+<%- include('../partials/header') %>
+<div class="auth-split">
+  <div class="auth-split-brand">
+    <img src="/img/velv-logo-white.png" alt="Velv">
+    <h2>Need a hand?<br>We're on it.</h2>
+    <p>Sign in with your Velv account so we know exactly who's asking.</p>
+  </div>
+  <div class="auth-split-form">
+    <span class="card-icon"><span class="icon icon-lock"></span></span>
+    <h1><%= t('landing_title') %></h1>
+    <p class="muted"><%= t('landing_intro') %></p>
+    <% if (error) { %>
+      <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+    <% } %>
+    <a href="/auth/microsoft/requester" class="button-primary button-block">
+      <img src="/img/microsoft-logo.svg" alt="" class="ms-logo"> <%= t('sign_in_with_microsoft') %>
+    </a>
+  </div>
+</div>
+<%- include('../partials/footer') %>

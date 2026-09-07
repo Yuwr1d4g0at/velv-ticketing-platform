@@ -3,6 +3,17 @@
   <h1>Help center</h1>
   <p class="muted">Answers to common questions - if you can't find what you need, <a href="/">submit a request</a> instead.</p>
 
+  <% if (requester) { %>
+    <p class="requester-identity">
+      Signed in as <strong><%= requester.name %></strong> &middot; <%= requester.email %>
+      &middot;
+      <form action="/requester/switch" method="POST" class="inline-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button type="submit" class="link-button">Not you? Switch account</button>
+      </form>
+    </p>
+  <% } %>
+
   <form action="/kb" method="GET" class="filter-bar">
     <input type="text" name="q" placeholder="Search articles&hellip;" value="<%= filters.q %>">
     <button type="submit" class="button-secondary">Search</button>

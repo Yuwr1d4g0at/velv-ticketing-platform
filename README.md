@@ -56,17 +56,26 @@ Visit `http://localhost:3000` for the request form, and
 
 ## Microsoft 365 SSO (optional)
 
-Agents can sign in with their Microsoft 365 (Entra ID) account instead of a
-password, on top of the existing username+password login (kept as a
-fallback either way — there's always a way in if Entra/Azure has a problem).
-Off entirely until you configure it — the login page just shows the
-password form, exactly as before.
+One Entra ID app registration, two separate uses of it - both controlled by
+the same `MS_TENANT_ID`/`MS_CLIENT_ID`/`MS_CLIENT_SECRET` env vars, both off
+entirely until you configure them:
 
-**Important:** signing in with Microsoft only ever logs someone in if their
-email already matches an existing, active agent (added the normal way, from
-the dashboard's Agents page or `npm run seed`) — it never creates a new
-agent by itself. Adding someone to your Microsoft 365 tenant does **not**
-by itself give them access to this app.
+- **Agent login** - agents can sign in with their Microsoft 365 account
+  instead of a password, on top of the existing username+password login
+  (kept as a fallback either way). Signing in with Microsoft only ever logs
+  someone in if their email already matches an existing, active agent
+  (added the normal way, from the dashboard's Agents page or `npm run
+  seed`) — it never creates a new agent by itself.
+- **Requester identification on the public request form** - once
+  configured, submitting a ticket *requires* signing in with a Microsoft
+  365 account first (the public form is no longer reachable without it),
+  and the ticket's name/email are taken from that verified account, not
+  freely typed. Unlike agent login, there's no allow-list here - any
+  successfully authenticated account in your tenant can file a ticket.
+
+**Important:** adding someone to your Microsoft 365 tenant does **not** by
+itself give them dashboard/agent access - that still requires an explicit
+agent row. It's enough, on its own, for them to sign in and submit tickets.
 
 Setup (needs Azure AD / Entra ID admin rights on your tenant):
 
@@ -76,34 +85,40 @@ Setup (needs Azure AD / Entra ID admin rights on your tenant):
    account types**, choose **"Accounts in this organizational directory
    only"** (single tenant) — this is an internal tool, not a multi-tenant app.
 3. Under **Redirect URI**, choose platform **Web** and enter
-   `<APP_URL>/auth/microsoft/callback` — using the exact same `APP_URL`
-   you'll set below (e.g. `https://helpdesk.velv.pt/auth/microsoft/callback`).
-   Add `http://localhost:3000/auth/microsoft/callback` too if you also want
-   to test this locally.
-4. Click **Register**. On the app's **Overview** page, note the
-   **Application (client) ID** and **Directory (tenant) ID**.
-5. Go to **Certificates & secrets** → **New client secret**. Copy the
+   `<APP_URL>/auth/microsoft/callback` (the agent login one) — using the
+   exact same `APP_URL` you'll set below (e.g.
+   `https://helpdesk.velv.pt/auth/microsoft/callback`).
+4. Click **Register**. On the app's **Authentication** page, add **two
+   more** redirect URIs (same Web platform):
+   `<APP_URL>/auth/microsoft/requester/callback` (the request-form one), and
+   `http://localhost:3000/auth/microsoft/callback` +
+   `http://localhost:3000/auth/microsoft/requester/callback` too if you
+   also want to test locally (four URIs total on one app registration).
+5. On the **Overview** page, note the **Application (client) ID** and
+   **Directory (tenant) ID**.
+6. Go to **Certificates & secrets** → **New client secret**. Copy the
    secret's **Value** immediately — it's only ever shown once.
-6. The default delegated Microsoft Graph permissions (`openid`, `profile`,
+7. The default delegated Microsoft Graph permissions (`openid`, `profile`,
    `email`) are enough for sign-in — no extra API permissions or admin
    consent should be needed for a single-tenant app, but check under **API
    permissions** if sign-in fails with a consent-related error.
 
 Fill in `.env`:
 ```
-APP_URL=https://helpdesk.velv.pt      # must match the redirect URI above
+APP_URL=https://helpdesk.velv.pt      # must match the redirect URIs above
 MS_TENANT_ID=<Directory (tenant) ID>
 MS_CLIENT_ID=<Application (client) ID>
-MS_CLIENT_SECRET=<the secret Value from step 5>
+MS_CLIENT_SECRET=<the secret Value from step 6>
 ```
 
 Restart the app — the login page now shows a "Sign in with Microsoft"
-button above the password form.
+button above the password form, and the public request form (`/`) now
+requires signing in with Microsoft before it'll show the actual form.
 
 ## How it works
 
-**Public (no login required)**
-- `/` — request form (name, email, category, optional freeform subcategory, subject, description, optional file attachments, optional related asset, and any custom fields defined for the chosen category). Priority isn't set here — see below. As you type a subject, matching published KB articles are suggested live below the field, in case self-service already answers it. Submitting shows a ticket number and, if email is configured, sends a confirmation. Available in English or Portuguese — the EN/PT toggle in the header sets a `velv_lang` cookie; the dashboard itself stays English-only. Attachments can be dragged onto the file field, not just picked from a dialog. A submission can also be auto-tagged, reprioritized, and/or reassigned by any matching **automation rule** (`/dashboard/settings/automation` — simple category/keyword conditions, evaluated once at creation; agent-initiated tickets aren't affected, since those already have a human's explicit judgment applied).
+**Public (no login required, unless Microsoft SSO is configured - see above)**
+- `/` — request form (name, email, category, optional freeform subcategory, subject, description, optional file attachments, optional related asset, and any custom fields defined for the chosen category). If `MS_*` SSO env vars are set, this requires signing in with Microsoft first instead - name/email then come from that account (shown as locked text, not editable fields) rather than being typed. Priority isn't set here — see below. As you type a subject, matching published KB articles are suggested live below the field, in case self-service already answers it. Submitting shows a ticket number and, if email is configured, sends a confirmation. Available in English or Portuguese — the EN/PT toggle in the header sets a `velv_lang` cookie; the dashboard itself stays English-only. Attachments can be dragged onto the file field, not just picked from a dialog. A submission can also be auto-tagged, reprioritized, and/or reassigned by any matching **automation rule** (`/dashboard/settings/automation` — simple category/keyword conditions, evaluated once at creation; agent-initiated tickets aren't affected, since those already have a human's explicit judgment applied).
 - `/status` — look up a ticket's status by ticket number + the email it was submitted with, including any attachments (download requires that same ticket number + email). Image attachments (PNG/JPEG/GIF/WebP only) get a small inline preview thumbnail; everything else still only ever force-downloads.
 - `/kb` — a public, searchable help center. Agents write and publish articles from the dashboard; a request form or ticket-status page reader can browse without logging in.
 

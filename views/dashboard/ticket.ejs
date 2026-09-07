@@ -154,71 +154,68 @@
 
   <div class="ticket-side">
     <div class="card">
-      <h2>Asset</h2>
-      <% if (asset) { %>
-        <p><a href="/dashboard/assets/<%= asset.id %>"><%= asset.name %></a></p>
-        <p class="muted"><% if (asset.asset_tag) { %><%= asset.asset_tag %> &middot; <% } %><%= asset.category %></p>
-      <% } else { %>
-        <p class="muted">No asset linked.</p>
-      <% } %>
-      <form action="/dashboard/tickets/<%= ticket.id %>/asset" method="POST" class="stacked-form">
-        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <select name="asset_id">
-          <option value="">No asset</option>
-          <% assignableAssets.forEach(function(a) { %>
-            <option value="<%= a.id %>" <%= ticket.asset_id === a.id ? 'selected' : '' %>>
-              <% if (a.asset_tag) { %><%= a.asset_tag %><% } else { %>Asset #<%= a.id %><% } %>
-            </option>
-          <% }) %>
-        </select>
-        <button type="submit" class="button-secondary">Update asset</button>
-      </form>
+      <h2>Properties</h2>
+      <div class="property-list">
+        <form action="/dashboard/tickets/<%= ticket.id %>/asset" method="POST" class="property-row">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <label for="asset_id">Asset</label>
+          <select id="asset_id" name="asset_id">
+            <option value="">No asset</option>
+            <% assignableAssets.forEach(function(a) { %>
+              <option value="<%= a.id %>" <%= ticket.asset_id === a.id ? 'selected' : '' %>>
+                <% if (a.asset_tag) { %><%= a.asset_tag %><% } else { %>Asset #<%= a.id %><% } %>
+              </option>
+            <% }) %>
+          </select>
+          <button type="submit" class="button-secondary">Save</button>
+        </form>
+        <% if (asset) { %>
+          <p class="muted">Linked: <a href="/dashboard/assets/<%= asset.id %>"><%= asset.name %></a></p>
+        <% } else { %>
+          <p class="muted">No asset linked.</p>
+        <% } %>
+
+        <form action="/dashboard/tickets/<%= ticket.id %>/priority" method="POST" class="property-row">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <label for="priority">Priority</label>
+          <select id="priority" name="priority">
+            <% priorities.forEach(function(p) { %>
+              <option value="<%= p %>" <%= ticket.priority === p ? 'selected' : '' %>><%= p %></option>
+            <% }) %>
+          </select>
+          <button type="submit" class="button-secondary">Save</button>
+        </form>
+
+        <form action="/dashboard/tickets/<%= ticket.id %>/status" method="POST" class="property-row">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <label for="status">Status</label>
+          <select id="status" name="status">
+            <% statuses.forEach(function(s) { %>
+              <option value="<%= s %>" <%= ticket.status === s ? 'selected' : '' %>><%= s %></option>
+            <% }) %>
+          </select>
+          <button type="submit" class="button-secondary">Save</button>
+        </form>
+
+        <form action="/dashboard/tickets/<%= ticket.id %>/assign" method="POST" class="property-row">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <label for="assigned_to">Assigned</label>
+          <select id="assigned_to" name="assigned_to">
+            <option value="">Unassigned</option>
+            <% agents.forEach(function(a) { %>
+              <option value="<%= a.id %>" <%= ticket.assigned_to === a.id ? 'selected' : '' %>><%= a.name %></option>
+            <% }) %>
+          </select>
+          <button type="submit" class="button-secondary">Save</button>
+        </form>
+      </div>
     </div>
 
     <div class="card">
-      <h2>Priority</h2>
-      <form action="/dashboard/tickets/<%= ticket.id %>/priority" method="POST" class="stacked-form">
-        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <select name="priority">
-          <% priorities.forEach(function(p) { %>
-            <option value="<%= p %>" <%= ticket.priority === p ? 'selected' : '' %>><%= p %></option>
-          <% }) %>
-        </select>
-        <button type="submit" class="button-secondary">Update priority</button>
-      </form>
-    </div>
+      <h2>Relationships</h2>
 
-    <div class="card">
-      <h2>Status</h2>
-      <form action="/dashboard/tickets/<%= ticket.id %>/status" method="POST" class="stacked-form">
-        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <select name="status">
-          <% statuses.forEach(function(s) { %>
-            <option value="<%= s %>" <%= ticket.status === s ? 'selected' : '' %>><%= s %></option>
-          <% }) %>
-        </select>
-        <button type="submit" class="button-secondary">Update status</button>
-      </form>
-    </div>
-
-    <div class="card">
-      <h2>Assignment</h2>
-      <form action="/dashboard/tickets/<%= ticket.id %>/assign" method="POST" class="stacked-form">
-        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <select name="assigned_to">
-          <option value="">Unassigned</option>
-          <% agents.forEach(function(a) { %>
-            <option value="<%= a.id %>" <%= ticket.assigned_to === a.id ? 'selected' : '' %>><%= a.name %></option>
-          <% }) %>
-        </select>
-        <button type="submit" class="button-secondary">Update assignment</button>
-      </form>
-    </div>
-
-    <% if (possibleDuplicates.length) { %>
-      <div class="card">
-        <h2>Possible duplicates</h2>
-        <p class="muted">Other open tickets with a similar subject.</p>
+      <% if (possibleDuplicates.length) { %>
+        <p class="card-subhead">Possible duplicates</p>
         <ul class="requester-history">
           <% possibleDuplicates.forEach(function(d) { %>
             <li>
@@ -231,12 +228,9 @@
             </li>
           <% }) %>
         </ul>
-      </div>
-    <% } %>
+      <% } %>
 
-    <div class="card">
-      <h2>Related tickets</h2>
-      <p class="muted">Link a genuinely separate ticket that's still connected to this one, without merging them.</p>
+      <p class="card-subhead">Related tickets</p>
       <% if (linkedTickets.length) { %>
         <ul class="requester-history">
           <% linkedTickets.forEach(function(l) { %>
@@ -251,25 +245,22 @@
           <% }) %>
         </ul>
       <% } %>
-      <form action="/dashboard/tickets/<%= ticket.id %>/link" method="POST" class="stacked-form">
+      <form action="/dashboard/tickets/<%= ticket.id %>/link" method="POST" class="property-row">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <label for="linked_ticket_id">Link ticket #</label>
+        <label for="linked_ticket_id">Link #</label>
         <input type="number" id="linked_ticket_id" name="linked_ticket_id" min="1" required>
         <button type="submit" class="button-secondary">Link</button>
       </form>
-    </div>
 
-    <div class="card">
-      <h2>Merge</h2>
-      <p class="muted">Fold this ticket into another one - its activity, attachments, and tags all move over, and this ticket closes and redirects here.</p>
+      <p class="card-subhead">Merge into another ticket</p>
       <form
         action="/dashboard/tickets/<%= ticket.id %>/merge"
         method="POST"
-        class="stacked-form"
+        class="property-row"
         data-confirm="Merge ticket #<%= ticket.id %> into another ticket? Its activity, attachments, and tags will move over, and this ticket will close. This can't be undone from here."
       >
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <label for="target_ticket_id">Merge into ticket #</label>
+        <label for="target_ticket_id">Merge into #</label>
         <input type="number" id="target_ticket_id" name="target_ticket_id" min="1" required>
         <button type="submit" class="button-secondary">Merge</button>
       </form>

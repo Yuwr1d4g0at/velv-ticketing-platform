@@ -56,6 +56,14 @@ const STRINGS = {
     send_reply_button: "Send reply",
     err_reply_empty: "Enter a message before sending.",
     you: "You",
+    // Microsoft sign-in landing page (only shown when MS_* SSO env vars
+    // are configured - see src/msSso.js)
+    landing_title: "Sign in to submit a request",
+    landing_intro: "Sign in with your Velv Microsoft account to submit a help request - we'll fill in your name and email automatically.",
+    sign_in_with_microsoft: "Sign in with Microsoft",
+    submitting_as: "Submitting as",
+    checking_status_as: "Checking status as",
+    not_you_switch: "Not you? Switch account",
     // Category display labels (stored value in the DB stays the fixed
     // English constant - see CATEGORY_LABELS below)
   },
@@ -106,6 +114,12 @@ const STRINGS = {
     send_reply_button: "Enviar resposta",
     err_reply_empty: "Escreva uma mensagem antes de enviar.",
     you: "Você",
+    landing_title: "Inicie sessão para enviar um pedido",
+    landing_intro: "Inicie sessão com a sua conta Microsoft da Velv para enviar um pedido de ajuda - o seu nome e email são preenchidos automaticamente.",
+    sign_in_with_microsoft: "Iniciar sessão com a Microsoft",
+    submitting_as: "A enviar como",
+    checking_status_as: "A consultar como",
+    not_you_switch: "Não é você? Trocar de conta",
   },
 };
 

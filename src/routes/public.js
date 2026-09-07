@@ -22,8 +22,33 @@ const {
   formatSize,
   LIMITS_HINT,
 } = require("../attachments");
+const { verifyCsrf } = require("../middleware/csrf");
+const msSso = require("../msSso");
 
 const router = express.Router();
+
+// Whether submitting a ticket requires signing in with Microsoft first
+// (see src/msSso.js) - deliberately the SAME flag that turns on agent SSO,
+// not a separate one: there's only one Entra app registration either way,
+// and requiring requester sign-in when Microsoft isn't even configured
+// would leave the public form permanently unusable. When this is false
+// (the default, and always true in this app's own test suite, which never
+// sets MS_* env vars), the form behaves exactly as it always has -
+// freely-typed name/email, no sign-in.
+function requesterSsoRequired() {
+  return msSso.isEnabled();
+}
+
+// Same gate for /status and /kb - redirects to "/" (which shows the
+// sign-in landing page, or the request form if already signed in) rather
+// than duplicating a second landing page for each section. A no-op when
+// SSO isn't configured, same as requesterSsoRequired() above.
+function requireRequesterSession(req, res, next) {
+  if (requesterSsoRequired() && !req.session.requester) {
+    return res.redirect("/");
+  }
+  next();
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -69,7 +94,44 @@ function subcategorySuggestions() {
     .map((r) => r.subcategory);
 }
 
+// "Sign in with Microsoft" for requesters (see src/msSso.js) - a separate
+// flow from agent login in src/routes/auth.js, sharing the same Entra app
+// registration and client but its own callback redirect URI. Any
+// successfully authenticated velv.pt account is accepted here - unlike
+// agent login, there's no allow-list, since any employee should be able to
+// file a ticket.
+router.get("/auth/microsoft/requester", async (req, res, next) => {
+  if (!msSso.isEnabled()) return res.status(404).render("error", { title: "Not found", message: "Not found." });
+  try {
+    res.redirect(await msSso.buildAuthUrl(req, "requester"));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/auth/microsoft/requester/callback", async (req, res) => {
+  if (!msSso.isEnabled()) return res.status(404).render("error", { title: "Not found", message: "Not found." });
+  try {
+    const account = await msSso.handleCallback(req, "requester");
+    req.session.requester = { email: account.email, name: account.name };
+    res.redirect("/");
+  } catch (err) {
+    res.status(401).render("public/request-landing", { title: t(req.lang, "landing_title"), error: "Could not sign in with Microsoft. Please try again." });
+  }
+});
+
+// Clears the signed-in requester identity (a shared computer, or someone
+// filing a follow-up ticket for a colleague) - back to the landing page (if
+// SSO is required) to sign in again as someone else.
+router.post("/requester/switch", verifyCsrf, (req, res) => {
+  delete req.session.requester;
+  res.redirect("/");
+});
+
 router.get("/", (req, res) => {
+  if (requesterSsoRequired() && !req.session.requester) {
+    return res.render("public/request-landing", { title: t(req.lang, "landing_title"), error: null });
+  }
   res.render("public/request-form", {
     title: t(req.lang, "submit_request_title"),
     categories: CATEGORIES,
@@ -79,19 +141,33 @@ router.get("/", (req, res) => {
     errors: [],
     values: {},
     uploadHint: LIMITS_HINT,
+    requester: req.session.requester || null,
   });
 });
 
 router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
+  if (requesterSsoRequired() && !req.session.requester) {
+    deleteUploadedFiles(req.files);
+    return res.redirect("/");
+  }
+
+  // Once signed in, the requester's name/email come from their verified
+  // Microsoft identity, never from the request body - the form doesn't
+  // even render those as editable inputs in that case (see
+  // views/public/request-form.ejs), but the server has to enforce this
+  // independently regardless of what the client actually sends, since a
+  // tampered POST could otherwise still smuggle in a different identity.
   const {
-    requester_name = "",
-    requester_email = "",
+    requester_name: bodyName = "",
+    requester_email: bodyEmail = "",
     category = "",
     subcategory = "",
     subject = "",
     description = "",
     asset_id = "",
   } = req.body;
+  const requester_name = req.session.requester ? req.session.requester.name : bodyName;
+  const requester_email = req.session.requester ? req.session.requester.email : bodyEmail;
 
   const values = { requester_name, requester_email, category, subcategory, subject, description, asset_id };
   const errors = [];
@@ -123,6 +199,7 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
       errors,
       values,
       uploadHint: LIMITS_HINT,
+      requester: req.session.requester || null,
     });
   }
 
@@ -223,27 +300,33 @@ function conversationForTicket(ticketId) {
     .all(ticketId);
 }
 
-router.get("/status", (req, res) => {
+router.get("/status", requireRequesterSession, (req, res) => {
   res.render("public/status-check", {
     title: t(req.lang, "check_status_title"),
     ticket: null,
     attachments: [],
     conversation: [],
     error: null,
+    requester: req.session.requester || null,
   });
 });
 
-router.post("/status", statusLimiter, (req, res) => {
-  const { ticket_id = "", requester_email = "" } = req.body;
+router.post("/status", statusLimiter, requireRequesterSession, (req, res) => {
+  const { ticket_id = "" } = req.body;
   const id = parseInt(ticket_id, 10);
+  // Once signed in, "the email used to submit it" is the verified session
+  // identity, not a re-typed field - the view doesn't even render that
+  // input in that case (see views/public/status-check.ejs).
+  const requesterEmail = req.session.requester ? req.session.requester.email : (req.body.requester_email || "").trim().toLowerCase();
 
-  if (!id || !requester_email.trim()) {
+  if (!id || !requesterEmail) {
     return res.render("public/status-check", {
       title: t(req.lang, "check_status_title"),
       ticket: null,
       attachments: [],
       conversation: [],
       error: t(req.lang, "err_status_missing_fields"),
+      requester: req.session.requester || null,
     });
   }
 
@@ -252,7 +335,7 @@ router.post("/status", statusLimiter, (req, res) => {
       `SELECT id, subject, description, category, priority, status, created_at, updated_at, requester_email
        FROM tickets WHERE id = ? AND requester_email = ?`
     )
-    .get(id, requester_email.trim().toLowerCase());
+    .get(id, requesterEmail);
 
   if (!ticket) {
     return res.render("public/status-check", {
@@ -261,6 +344,7 @@ router.post("/status", statusLimiter, (req, res) => {
       attachments: [],
       conversation: [],
       error: t(req.lang, "err_status_not_found"),
+      requester: req.session.requester || null,
     });
   }
 
@@ -274,6 +358,7 @@ router.post("/status", statusLimiter, (req, res) => {
     })),
     conversation: conversationForTicket(ticket.id),
     error: null,
+    requester: req.session.requester || null,
   });
 });
 
@@ -281,10 +366,15 @@ router.post("/status", statusLimiter, (req, res) => {
 // requester email on file). If the ticket was Resolved or Closed, a reply
 // reopens it - the requester replying at all is a pretty strong signal it
 // isn't actually done, same as every major helpdesk tool does.
-router.post("/status/reply", statusLimiter, (req, res) => {
-  const { ticket_id = "", requester_email = "", message = "" } = req.body;
+router.post("/status/reply", statusLimiter, requireRequesterSession, (req, res) => {
+  const { ticket_id = "", message = "" } = req.body;
   const id = parseInt(ticket_id, 10);
-  const email = requester_email.trim().toLowerCase();
+  // Once signed in, use the verified session identity rather than trusting
+  // whatever the form's hidden requester_email field carried - it's always
+  // supposed to already match (the view fills it from the found ticket's
+  // own row), but the server enforces this independently regardless of
+  // what a tampered request actually sends.
+  const email = req.session.requester ? req.session.requester.email : (req.body.requester_email || "").trim().toLowerCase();
 
   const ticket = db.prepare("SELECT * FROM tickets WHERE id = ? AND requester_email = ?").get(id, email);
   if (!ticket) {
@@ -303,6 +393,7 @@ router.post("/status/reply", statusLimiter, (req, res) => {
     })),
       conversation: conversationForTicket(ticket.id),
       error: t(req.lang, "err_reply_empty"),
+      requester: req.session.requester || null,
     });
   }
 
@@ -356,19 +447,21 @@ router.post("/status/reply", statusLimiter, (req, res) => {
     })),
     conversation: conversationForTicket(ticket.id),
     error: null,
+    requester: req.session.requester || null,
   });
 });
 
 // Downloading a file requires the same proof of ownership as looking the ticket
 // up in the first place: the exact requester email on file. Same trust model
 // /status already uses, just extended to cover the attachment's bytes too.
-router.post("/status/attachments/:attachmentId/download", statusLimiter, (req, res) => {
-  const { ticket_id = "", requester_email = "" } = req.body;
+router.post("/status/attachments/:attachmentId/download", statusLimiter, requireRequesterSession, (req, res) => {
+  const { ticket_id = "" } = req.body;
   const id = parseInt(ticket_id, 10);
+  const requesterEmail = req.session.requester ? req.session.requester.email : (req.body.requester_email || "").trim().toLowerCase();
 
   const ticket = db
     .prepare("SELECT id FROM tickets WHERE id = ? AND requester_email = ?")
-    .get(id, (requester_email || "").trim().toLowerCase());
+    .get(id, requesterEmail);
   if (!ticket) {
     return res.status(404).render("error", { title: "Not found", message: "That attachment does not exist." });
   }
@@ -385,9 +478,9 @@ router.post("/status/attachments/:attachmentId/download", statusLimiter, (req, r
 // can't send a POST body) - ticket_id + requester_email travel as query
 // params instead. Only ever serves the narrow SAFE_PREVIEW_TYPES subset
 // inline; everything else still only ever force-downloads.
-router.get("/status/attachments/:attachmentId/preview", previewLimiter, (req, res) => {
+router.get("/status/attachments/:attachmentId/preview", previewLimiter, requireRequesterSession, (req, res) => {
   const id = parseInt(req.query.ticket_id, 10);
-  const email = (req.query.requester_email || "").trim().toLowerCase();
+  const email = req.session.requester ? req.session.requester.email : (req.query.requester_email || "").trim().toLowerCase();
 
   const ticket = db.prepare("SELECT id FROM tickets WHERE id = ? AND requester_email = ?").get(id, email);
   if (!ticket) {
@@ -404,12 +497,13 @@ router.get("/status/attachments/:attachmentId/preview", previewLimiter, (req, re
   res.sendFile(path.join(ATTACHMENTS_DIR, attachment.stored_name));
 });
 
-router.get("/kb", (req, res) => {
+router.get("/kb", requireRequesterSession, (req, res) => {
   const { category = "", q = "" } = req.query;
   res.render("public/kb-list", {
     title: "Help center",
     articles: kb.publishedList({ category, q }),
     filters: { category, q },
+    requester: req.session.requester || null,
   });
 });
 
@@ -427,12 +521,12 @@ router.get("/kb/suggest.json", previewLimiter, (req, res) => {
   res.json(matches);
 });
 
-router.get("/kb/:slug", (req, res) => {
+router.get("/kb/:slug", requireRequesterSession, (req, res) => {
   const article = kb.getBySlug(req.params.slug);
   if (!article) {
     return res.status(404).render("error", { title: "Not found", message: "That article doesn't exist or isn't published." });
   }
-  res.render("public/kb-article", { title: article.title, article });
+  res.render("public/kb-article", { title: article.title, article, requester: req.session.requester || null });
 });
 
 // Reached via the link in the "ticket resolved" email, not a login - see the

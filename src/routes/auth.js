@@ -62,7 +62,7 @@ router.post("/login", loginLimiter, verifyCsrf, (req, res) => {
 router.get("/auth/microsoft", async (req, res, next) => {
   if (!msSso.isEnabled()) return res.status(404).render("error", { title: "Not found", message: "Not found." });
   try {
-    res.redirect(await msSso.buildAuthUrl(req));
+    res.redirect(await msSso.buildAuthUrl(req, "agent"));
   } catch (err) {
     next(err);
   }
@@ -73,7 +73,7 @@ router.get("/auth/microsoft/callback", async (req, res) => {
 
   let account;
   try {
-    account = await msSso.handleCallback(req);
+    account = await msSso.handleCallback(req, "agent");
   } catch (err) {
     // A stray retry, an expired state, or the agent clicking back/refresh
     // on this page - not worth a 500, just send them back to try again.

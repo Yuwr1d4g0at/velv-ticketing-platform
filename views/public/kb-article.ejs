@@ -1,6 +1,16 @@
 <%- include('../partials/header') %>
 <div class="card card-wide">
   <p><a href="/kb">&larr; Help center</a></p>
+  <% if (requester) { %>
+    <p class="requester-identity">
+      Signed in as <strong><%= requester.name %></strong> &middot; <%= requester.email %>
+      &middot;
+      <form action="/requester/switch" method="POST" class="inline-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button type="submit" class="link-button">Not you? Switch account</button>
+      </form>
+    </p>
+  <% } %>
   <h1><%= article.title %></h1>
   <% if (article.category) { %><span class="badge badge-status-open"><%= article.category %></span><% } %>
   <p class="preserve-newlines"><%= article.body %></p>

@@ -615,6 +615,20 @@ select {
    ============================================================ */
 .card-wide { max-width: 880px; margin-left: auto; margin-right: auto; }
 
+/* "Submitting as ..." banner on the public request form, shown once signed
+   in via Microsoft (see views/public/request-form.ejs) - name/email are
+   locked (plain text, not inputs) at that point, so this is the only place
+   they're shown before the ticket itself is created. */
+.requester-identity {
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-5);
+  font-size: var(--fs-body-sm);
+  color: var(--text-body);
+}
+.requester-identity .inline-form { margin-left: var(--space-1); }
+
 .split-layout {
   display: grid;
   grid-template-columns: minmax(0, 280px) 1fr;
@@ -1089,6 +1103,51 @@ form.split-layout.stacked-form { display: grid; max-width: none; }
   margin-bottom: var(--space-5);
 }
 .ticket-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-5); align-items: start; }
+
+/* Ticket detail sidebar: consolidated cards (Properties, Relationships)
+   instead of one small single-field card each - same forms/routes as
+   before, just grouped so the sidebar isn't 8 near-identical tiny boxes.
+   .property-row mirrors .filter-bar's own compact label+field+button row
+   (same heights/colors), just with a fixed-width label instead of a
+   flex:1 text input up front. */
+.property-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.property-row { display: flex; align-items: center; gap: var(--space-2); margin: 0; }
+.property-row label { flex: 0 0 72px; font-size: var(--fs-body-sm); font-weight: var(--fw-medium); color: var(--text-body); }
+.property-row select,
+.property-row input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-card);
+  color: var(--text-strong);
+  font-family: inherit;
+  font-size: var(--fs-body-sm);
+}
+.property-row select:focus,
+.property-row input[type="number"]:focus {
+  outline: none;
+  border-color: var(--velv-electric);
+  box-shadow: 0 0 0 4px var(--focus-ring);
+}
+.property-row .button-secondary { flex: 0 0 auto; height: 36px; padding: 0 var(--space-3); font-size: var(--fs-caption); margin-top: 0; }
+
+/* A small muted overline between subsections sharing one card (e.g.
+   Relationships: possible duplicates / related tickets / merge) - like
+   .chart-eyebrow but with real top margin, since this one separates two
+   already-populated blocks rather than sitting right above a card's own
+   <h2> title. */
+.card-subhead {
+  font-size: var(--fs-overline);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-overline);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: var(--space-4) 0 var(--space-2);
+}
+.card-subhead:first-of-type { margin-top: 0; }
 
 /* Dashboard: the ticket list (filters/bulk actions/table/pagination) sits
    full width up top, exactly like the plain ticket-only dashboard always

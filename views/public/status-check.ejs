@@ -9,15 +9,30 @@
       <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
     <% } %>
 
+    <% if (requester) { %>
+      <p class="requester-identity">
+        <%= t('checking_status_as') %> <strong><%= requester.name %></strong> &middot; <%= requester.email %>
+      </p>
+    <% } %>
+
     <form action="/status" method="POST" class="stacked-form">
       <label for="ticket_id"><%= t('ticket_number') %></label>
       <input type="number" id="ticket_id" name="ticket_id" min="1" required>
 
-      <label for="requester_email"><%= t('email_used') %></label>
-      <input type="email" id="requester_email" name="requester_email" required maxlength="200">
+      <% if (!requester) { %>
+        <label for="requester_email"><%= t('email_used') %></label>
+        <input type="email" id="requester_email" name="requester_email" required maxlength="200">
+      <% } %>
 
       <button type="submit" class="button-primary"><%= t('check_status_button') %></button>
     </form>
+
+    <% if (requester) { %>
+      <form action="/requester/switch" method="POST" class="inline-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button type="submit" class="link-button"><%= t('not_you_switch') %></button>
+      </form>
+    <% } %>
   </div>
 
   <% if (ticket) { %>
