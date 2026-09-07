@@ -12,6 +12,8 @@ const {
   currentThresholds,
   currentFirstResponseThresholds,
   businessHoursElapsed,
+  BUSINESS_HOURS_PER_DAY,
+  FALLBACK_DAYS,
 } = require("../aging");
 const { sendStatusChangeEmail, sendResolvedEmail, sendReplyEmail, sendTicketCreatedEmail, sendMentionEmail } = require("../mailer");
 const { findMentionedAgents } = require("../mentions");
@@ -27,6 +29,7 @@ const recurring = require("../recurring");
 const automation = require("../automation");
 const notifications = require("../notifications");
 const customFields = require("../custom-fields");
+const holidays = require("../holidays");
 const {
   ATTACHMENTS_DIR,
   SAFE_PREVIEW_TYPES,
@@ -260,8 +263,13 @@ router.get("/", (req, res) => {
     Object.fromEntries(Object.entries(filters).filter(([, v]) => v))
   ).toString();
 
+  const rawReportRange = resolveReportRange(req.query);
+  const reportUnit = reportBucketUnit(rawReportRange.from, rawReportRange.to);
+  const reportRange = { ...rawReportRange, unit: reportUnit, label: reportRangeLabel(rawReportRange) };
+
   res.render("dashboard/home", {
     title: "Dashboard",
+    wide: true,
     tickets,
     counts,
     satisfaction,
@@ -278,6 +286,8 @@ router.get("/", (req, res) => {
     totalCount,
     exportQuery,
     savedViews: db.prepare("SELECT * FROM saved_views WHERE agent_id = ? ORDER BY created_at DESC").all(req.session.agentId),
+    reportRange,
+    ...buildReportsData(rawReportRange, reportUnit),
   });
 });
 
@@ -1274,31 +1284,122 @@ function barClass(prefix, value, max) {
   return `${prefix}-${Math.min(100, Math.max(0, pct))}`;
 }
 
-router.get("/reports", (req, res) => {
-  // Ticket volume per day for the last 30 days, zero-filled so a quiet day
-  // shows as an actual zero-height bar, not a gap that's easy to misread as
-  // missing data.
-  const volumeRows = db
-    .prepare(
-      `SELECT date(created_at) AS day, COUNT(*) AS count
-       FROM tickets
-       WHERE created_at >= date('now', '-29 days')
-       GROUP BY day`
-    )
-    .all();
-  const volumeByDay = Object.fromEntries(volumeRows.map((r) => [r.day, r.count]));
-  const volume = [];
-  for (let i = 29; i >= 0; i--) {
-    const day = new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    volume.push({ day, count: volumeByDay[day] || 0 });
+// Reports now live inside /dashboard itself (a sidebar next to the ticket
+// list), not a separate page - see buildReportsData() below and the
+// ...buildReportsData() spread into the "/" route's render call. Kept as a
+// redirect, not removed outright, so an old bookmark/link to this URL still
+// lands somewhere useful instead of 404ing.
+router.get("/reports", (req, res) => res.redirect("/dashboard"));
+
+const REPORT_RANGE_PRESETS = { "7d": 7, "30d": 30, "90d": 90 };
+const REPORT_RANGE_LABELS = { "7d": "Last 7 days", "30d": "Last 30 days", "90d": "Last 90 days" };
+
+function defaultWindow(days) {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const to = today.toISOString().slice(0, 10);
+  const from = new Date(today.getTime() - (days - 1) * 86400000).toISOString().slice(0, 10);
+  return { from, to };
+}
+
+// Reads ?report_range (7d/30d/90d/custom) + ?report_from/?report_to (only
+// for custom) off the querystring, always falling back to a valid 30-day
+// window - so a missing/garbled param never breaks the page, it just shows
+// the same default it always has. Kept entirely separate from the ticket
+// list's own filters (buildTicketFilter) - different querystring keys, on
+// purpose, so changing one never resets the other.
+function resolveReportRange(query) {
+  if (query.report_range === "custom") {
+    let from = query.report_from;
+    let to = query.report_to;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      if (from > to) [from, to] = [to, from];
+      return { range: "custom", from, to };
+    }
+    // "Custom range" was just picked but real dates haven't been typed in
+    // and applied yet (the date inputs don't exist in the DOM until this
+    // very response renders them) - stay in "custom" mode so the view
+    // actually shows those inputs, just use a plain 30-day window under
+    // the hood until the agent fills them in and hits Apply for real.
+    return { range: "custom", ...defaultWindow(30) };
   }
+  const range = REPORT_RANGE_PRESETS[query.report_range] ? query.report_range : "30d";
+  return { range, ...defaultWindow(REPORT_RANGE_PRESETS[range]) };
+}
+
+function reportRangeLabel(reportRange) {
+  if (reportRange.range === "custom") return `${reportRange.from} to ${reportRange.to}`;
+  return REPORT_RANGE_LABELS[reportRange.range] || REPORT_RANGE_LABELS["30d"];
+}
+
+// Whole calendar days between from/to (both YYYY-MM-DD, inclusive) - pure
+// UTC string/number math throughout, deliberately not local-timezone Date
+// mutation, to match how created_at is stored (datetime('now'), UTC) and
+// how date(created_at) already groups it in SQL.
+function daysBetween(from, to) {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1;
+}
+
+// Daily bars stay readable up to about a month of data; past that, this
+// switches every date-bucketed chart (volume, CSAT trend, SLA compliance)
+// to one bar per month instead, so a 90-day or custom multi-month range
+// doesn't render 90+ razor-thin bars.
+function reportBucketUnit(from, to) {
+  return daysBetween(from, to) <= 31 ? "day" : "month";
+}
+
+function eachDayBucket(from, to) {
+  const fromMs = Date.parse(`${from}T00:00:00Z`);
+  const n = daysBetween(from, to);
+  return Array.from({ length: n }, (_, i) => new Date(fromMs + i * 86400000).toISOString().slice(0, 10));
+}
+
+function eachMonthBucket(from, to) {
+  let [y, m] = from.slice(0, 7).split("-").map(Number);
+  const [endY, endM] = to.slice(0, 7).split("-").map(Number);
+  const out = [];
+  while (y < endY || (y === endY && m <= endM)) {
+    out.push(`${y}-${String(m).padStart(2, "0")}`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return out;
+}
+
+// Everything the Reports section on /dashboard needs, gathered in one place
+// so the "/" route's render call can just spread it in. `reportRange` is
+// {range, from, to} from resolveReportRange() above; `unit` ("day" or
+// "month") from reportBucketUnit() - passed in rather than recomputed here
+// since the "/" route needs `unit` too, for the range-picker form itself.
+function buildReportsData(reportRange, unit) {
+  const { from, to } = reportRange;
+  const rangeParams = [from, to];
+  const rangeWhere = "created_at >= ? AND created_at < date(?, '+1 day')";
+  const bucketExpr = unit === "day" ? "date(created_at)" : "strftime('%Y-%m', created_at)";
+  const bucketKeys = unit === "day" ? eachDayBucket(from, to) : eachMonthBucket(from, to);
+
+  // Ticket volume per bucket across the selected range, zero-filled so a
+  // quiet bucket shows as an actual zero-height bar, not a gap that's easy
+  // to misread as missing data.
+  const volumeRows = db
+    .prepare(`SELECT ${bucketExpr} AS bucket, COUNT(*) AS count FROM tickets WHERE ${rangeWhere} GROUP BY bucket`)
+    .all(...rangeParams);
+  const volumeByBucket = Object.fromEntries(volumeRows.map((r) => [r.bucket, r.count]));
+  const volume = bucketKeys.map((bucket) => ({ day: bucket, count: volumeByBucket[bucket] || 0 }));
 
   const byCategory = db
-    .prepare("SELECT category AS label, COUNT(*) AS count FROM tickets GROUP BY category ORDER BY count DESC")
-    .all();
+    .prepare(`SELECT category AS label, COUNT(*) AS count FROM tickets WHERE ${rangeWhere} GROUP BY category ORDER BY count DESC`)
+    .all(...rangeParams);
   const byStatus = db
-    .prepare("SELECT status AS label, COUNT(*) AS count FROM tickets GROUP BY status ORDER BY count DESC")
-    .all();
+    .prepare(`SELECT status AS label, COUNT(*) AS count FROM tickets WHERE ${rangeWhere} GROUP BY status ORDER BY count DESC`)
+    .all(...rangeParams);
+
+  // Current workload deliberately ignores the selected report range - it's
+  // a live "who has what open right now" snapshot, not a historical count,
+  // so picking "Last 7 days" shouldn't hide someone's older backlog.
   const byAgent = db
     .prepare(
       `SELECT COALESCE(agents.name, 'Unassigned') AS label, COUNT(*) AS count
@@ -1316,24 +1417,25 @@ router.get("/reports", (req, res) => {
     return rows.map((r) => ({ ...r, barClass: barClass(prefix, r.count, max) }));
   };
 
-  const { resolutionTime, firstResponseTime } = ticketTimingStats();
-
-  // CSAT trend by month - only months with at least one rating, rather than
-  // zero-filling like the volume chart above: a rating scale of 1-5 has no
+  // CSAT trend, bucketed the same way as volume above - only buckets with
+  // at least one rating, rather than zero-filled: a 1-5 rating scale has no
   // sensible "0" to zero-fill with, since that would look identical to a
-  // genuinely bad average rather than "nobody rated anything that month".
+  // genuinely bad average rather than "nobody rated anything that bucket".
+  const csatBucketExpr = unit === "day" ? "date(created_at)" : "strftime('%Y-%m', created_at)";
   const csatTrend = db
     .prepare(
-      `SELECT strftime('%Y-%m', created_at) AS month, AVG(rating) AS avg_rating, COUNT(*) AS count
-       FROM ticket_ratings GROUP BY month ORDER BY month`
+      `SELECT ${csatBucketExpr} AS month, AVG(rating) AS avg_rating, COUNT(*) AS count
+       FROM ticket_ratings WHERE ${rangeWhere} GROUP BY month ORDER BY month`
     )
-    .all()
+    .all(...rangeParams)
     .map((r) => ({ ...r, barClass: barClass("bar-h", r.avg_rating, 5) }));
 
-  // Per-agent breakdown: how many of their tickets are currently
-  // resolved/closed, how long those took on average, and their average
-  // CSAT across whichever of their tickets got rated - a fuller picture
-  // than the "current open workload" byAgent table above.
+  // Per-agent breakdown, scoped to tickets actually RESOLVED within the
+  // selected range (not created within it) - "how did each agent do during
+  // this window" is what picking a date range is normally asking. avg_csat
+  // is a known, pre-existing simplification kept as-is: it averages every
+  // rating this agent's tickets have ever received, not only ratings on
+  // tickets that resolved inside this particular range.
   const agentPerformance = db
     .prepare(
       `SELECT agents.name,
@@ -1345,7 +1447,7 @@ router.get("/reports", (req, res) => {
        LEFT JOIN (
          SELECT ticket_id, MAX(created_at) AS happened
          FROM ticket_activity
-         WHERE type = 'status_change' AND body LIKE '%to "Resolved".'
+         WHERE type = 'status_change' AND body LIKE '%to "Resolved".' AND created_at >= ? AND created_at < date(?, '+1 day')
          GROUP BY ticket_id
        ) resolved ON resolved.ticket_id = tickets.id
        LEFT JOIN ticket_ratings ON ticket_ratings.ticket_id = tickets.id
@@ -1353,42 +1455,86 @@ router.get("/reports", (req, res) => {
        GROUP BY agents.id
        ORDER BY resolved_count DESC`
     )
-    .all();
+    .all(...rangeParams);
 
-  // Reopen rate: of tickets ever resolved, how many were later reopened
-  // (either an agent manually moving it back, or the auto-reopen-on-
-  // requester-reply in public.js - both leave a status_change activity row
-  // reading "from Resolved/Closed to ...") - a rough proxy for "are we
-  // actually fixing things" that isn't visible anywhere else today.
+  // Reopen rate: of tickets resolved within the range, how many were later
+  // reopened (either an agent manually moving it back, or the auto-reopen-
+  // on-requester-reply in public.js - both leave a status_change activity
+  // row reading "from Resolved/Closed to ...") - a rough proxy for "are we
+  // actually fixing things".
   const everResolvedCount = db
     .prepare(
       `SELECT COUNT(DISTINCT ticket_id) AS c FROM ticket_activity
-       WHERE type = 'status_change' AND body LIKE '%to "Resolved".'`
+       WHERE type = 'status_change' AND body LIKE '%to "Resolved".' AND ${rangeWhere}`
     )
-    .get().c;
+    .get(...rangeParams).c;
   const reopenedCount = db
     .prepare(
       `SELECT COUNT(DISTINCT ticket_id) AS c FROM ticket_activity
-       WHERE type = 'status_change' AND (body LIKE '%from "Resolved" to%' OR body LIKE '%from "Closed" to%')`
+       WHERE type = 'status_change' AND (body LIKE '%from "Resolved" to%' OR body LIKE '%from "Closed" to%') AND ${rangeWhere}`
     )
-    .get().c;
+    .get(...rangeParams).c;
   const reopenRate = everResolvedCount ? (reopenedCount / everResolvedCount) * 100 : null;
 
-  res.render("dashboard/reports", {
-    title: "Reports",
+  // SLA compliance trend: of tickets resolved within the range, bucketed
+  // the same way as volume/CSAT above, what fraction met their priority's
+  // resolution threshold (src/aging.js's business-hours math, minus any
+  // Waiting-on-Customer pauses)? Two known simplifications, both fine for
+  // an internal trend chart rather than an audit record: thresholds are
+  // always the CURRENT ones (not whatever was configured back when a given
+  // ticket actually resolved), and paused_hours reflects each ticket's
+  // present-day cumulative value (exact for a ticket resolved once, an
+  // approximation for one that later reopened, paused again, and
+  // re-resolved before the range's own end date).
+  const slaBucketExpr = unit === "day" ? "date(resolved.happened)" : "strftime('%Y-%m', resolved.happened)";
+  const resolvedForSla = db
+    .prepare(
+      `SELECT tickets.priority, tickets.created_at, tickets.paused_hours, resolved.happened AS resolved_at,
+              ${slaBucketExpr} AS bucket
+       FROM tickets
+       JOIN (
+         SELECT ticket_id, MAX(created_at) AS happened
+         FROM ticket_activity
+         WHERE type = 'status_change' AND body LIKE '%to "Resolved".'
+         GROUP BY ticket_id
+       ) resolved ON resolved.ticket_id = tickets.id
+       WHERE resolved.happened >= ? AND resolved.happened < date(?, '+1 day')`
+    )
+    .all(...rangeParams);
+
+  const slaThresholds = currentThresholds();
+  const slaBuckets = {};
+  for (const t of resolvedForSla) {
+    const created = new Date(`${t.created_at.replace(" ", "T")}Z`);
+    const resolvedAt = new Date(`${t.resolved_at.replace(" ", "T")}Z`);
+    const hours = Math.max(0, businessHoursElapsed(created, resolvedAt) - (t.paused_hours || 0));
+    const thresholdDays = slaThresholds[t.priority] ?? FALLBACK_DAYS;
+    const met = hours <= thresholdDays * BUSINESS_HOURS_PER_DAY;
+    if (!slaBuckets[t.bucket]) slaBuckets[t.bucket] = { met: 0, total: 0 };
+    slaBuckets[t.bucket].total += 1;
+    if (met) slaBuckets[t.bucket].met += 1;
+  }
+  const slaCompliance = Object.keys(slaBuckets)
+    .sort()
+    .map((bucket) => {
+      const { met, total } = slaBuckets[bucket];
+      const pct = (met / total) * 100;
+      return { month: bucket, pct, met, total, barClass: barClass("bar-h", pct, 100) };
+    });
+
+  return {
     volume: volume.map((v) => ({ ...v, barClass: barClass("bar-h", v.count, volumeMax) })),
     byCategory: withBarClass(byCategory, "bar-w"),
     byStatus: withBarClass(byStatus, "bar-w"),
     byAgent: withBarClass(byAgent, "bar-w"),
-    resolutionTime,
-    firstResponseTime,
     csatTrend,
+    slaCompliance,
     agentPerformance,
     everResolvedCount,
     reopenedCount,
     reopenRate,
-  });
-});
+  };
+}
 
 router.get("/settings", (req, res) => {
   res.render("dashboard/settings", {
@@ -1571,6 +1717,36 @@ router.get("/settings/login-log", (req, res) => {
     )
     .all();
   res.render("dashboard/login-log", { title: "Login activity", entries });
+});
+
+router.get("/settings/holidays", (req, res) => {
+  res.render("dashboard/holidays", {
+    title: "Company holidays",
+    holidays: holidays.listHolidays(),
+    error: null,
+  });
+});
+
+router.post("/settings/holidays", verifyCsrf, (req, res) => {
+  const date = (req.body.date || "").trim();
+  const name = (req.body.name || "").trim().slice(0, 200);
+  const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date);
+
+  if (!validDate || !name) {
+    return res.status(400).render("dashboard/holidays", {
+      title: "Company holidays",
+      holidays: holidays.listHolidays(),
+      error: "Enter a valid date and a name for the holiday.",
+    });
+  }
+
+  holidays.addHoliday(date, name);
+  res.redirect("/dashboard/settings/holidays");
+});
+
+router.post("/settings/holidays/:id/delete", verifyCsrf, (req, res) => {
+  holidays.deleteHoliday(req.params.id);
+  res.redirect("/dashboard/settings/holidays");
 });
 
 router.get("/agents", (req, res) => {

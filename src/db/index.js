@@ -351,6 +351,19 @@ db.exec(`
     priority TEXT PRIMARY KEY,
     hours    INTEGER NOT NULL
   );
+
+  -- Company-wide non-working days (public holidays, office closures) - the
+  -- business-hours aging/SLA math in src/aging.js treats these exactly like
+  -- a weekend (0 business hours that day), on top of the fixed Mon-Fri
+  -- 09:00-18:00 window. date is the unique key (one entry per calendar day),
+  -- not an id-per-year recurrence rule - simplest thing that works for one
+  -- team's own holiday list, re-entered yearly from /dashboard/settings/holidays.
+  CREATE TABLE IF NOT EXISTS company_holidays (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    date       TEXT NOT NULL UNIQUE,
+    name       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // sla_thresholds starts empty on a fresh database (CREATE TABLE doesn't seed

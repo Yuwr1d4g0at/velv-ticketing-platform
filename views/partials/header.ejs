@@ -27,7 +27,6 @@
             <a href="/dashboard/agents">Agents</a>
             <a href="/dashboard/canned-responses">Responses</a>
             <a href="/dashboard/kb">Knowledge base</a>
-            <a href="/dashboard/reports">Reports</a>
             <a href="/dashboard/settings">Settings</a>
             <details class="notif-bell" data-csrf="<%= csrfToken %>">
               <summary aria-label="Notifications">
@@ -79,4 +78,4 @@
       </div>
     </div>
   </header>
-  <main class="page" id="main-content">
+  <main class="page<%= typeof wide !== 'undefined' && wide ? ' page-wide' : '' %>" id="main-content">

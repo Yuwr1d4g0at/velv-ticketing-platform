@@ -12,6 +12,7 @@ submit issues, and a staff dashboard to triage, assign, and resolve them.
 - Session-based auth (**express-session**) with a custom SQLite-backed session store, so logins survive a server restart
 - Passwords hashed with **bcryptjs**
 - **helmet** for security headers, **express-rate-limit** on the login form, and a hand-rolled CSRF token on every state-changing form
+- Optional "Sign in with Microsoft" (Entra ID) via **openid-client** — off unless configured, see below
 
 Requires **Node.js 22.5+** (uses the built-in SQLite module).
 
@@ -53,6 +54,52 @@ npm run dev         # restarts automatically on file changes
 Visit `http://localhost:3000` for the request form, and
 `http://localhost:3000/login` for the staff dashboard.
 
+## Microsoft 365 SSO (optional)
+
+Agents can sign in with their Microsoft 365 (Entra ID) account instead of a
+password, on top of the existing username+password login (kept as a
+fallback either way — there's always a way in if Entra/Azure has a problem).
+Off entirely until you configure it — the login page just shows the
+password form, exactly as before.
+
+**Important:** signing in with Microsoft only ever logs someone in if their
+email already matches an existing, active agent (added the normal way, from
+the dashboard's Agents page or `npm run seed`) — it never creates a new
+agent by itself. Adding someone to your Microsoft 365 tenant does **not**
+by itself give them access to this app.
+
+Setup (needs Azure AD / Entra ID admin rights on your tenant):
+
+1. Go to [entra.microsoft.com](https://entra.microsoft.com) (or the Azure
+   Portal → Microsoft Entra ID) → **App registrations** → **New registration**.
+2. Name it anything (e.g. "Velv Ticketing Platform"). Under **Supported
+   account types**, choose **"Accounts in this organizational directory
+   only"** (single tenant) — this is an internal tool, not a multi-tenant app.
+3. Under **Redirect URI**, choose platform **Web** and enter
+   `<APP_URL>/auth/microsoft/callback` — using the exact same `APP_URL`
+   you'll set below (e.g. `https://helpdesk.velv.pt/auth/microsoft/callback`).
+   Add `http://localhost:3000/auth/microsoft/callback` too if you also want
+   to test this locally.
+4. Click **Register**. On the app's **Overview** page, note the
+   **Application (client) ID** and **Directory (tenant) ID**.
+5. Go to **Certificates & secrets** → **New client secret**. Copy the
+   secret's **Value** immediately — it's only ever shown once.
+6. The default delegated Microsoft Graph permissions (`openid`, `profile`,
+   `email`) are enough for sign-in — no extra API permissions or admin
+   consent should be needed for a single-tenant app, but check under **API
+   permissions** if sign-in fails with a consent-related error.
+
+Fill in `.env`:
+```
+APP_URL=https://helpdesk.velv.pt      # must match the redirect URI above
+MS_TENANT_ID=<Directory (tenant) ID>
+MS_CLIENT_ID=<Application (client) ID>
+MS_CLIENT_SECRET=<the secret Value from step 5>
+```
+
+Restart the app — the login page now shows a "Sign in with Microsoft"
+button above the password form.
+
 ## How it works
 
 **Public (no login required)**
@@ -67,7 +114,9 @@ The status page also shows the requester-visible conversation (agent replies + t
 - `/rate/:token` — a one-click satisfaction survey (1–5 stars + optional comment). The link is emailed automatically the moment a ticket is marked Resolved (only if email is configured); the token is a bearer link, not a login, since rating a ticket doesn't expose anything sensitive.
 
 **Dashboard (login required, any active agent account)**
-- `/dashboard` — all tickets, paginated, with counts by status (including **Waiting on Customer**, see below), a filter bar (status/priority/category/assignment/tag/**full-text search**), bulk status-change/reassignment/**tag add-or-remove** (select rows, apply to all of them), and a CSV export of whatever's currently filtered. Search is backed by SQLite FTS5 over subject/description (prefix-matched, multi-word AND), not a plain substring match — requester name/email search is still a plain substring match. Tickets still open past a priority-scaled threshold (Urgent ages fastest, Low slowest, counted in **business hours** — Mon-Fri 09:00-18:00, not raw calendar time, so a ticket filed Friday evening doesn't visibly age all weekend) are flagged on the dashboard *and* proactively emailed to whoever they're assigned to (see `SLA_CHECK_INTERVAL_MINUTES` below) — once per breach, not repeatedly. A separate, usually tighter **first-response target** (editable alongside the aging thresholds) triggers its own one-time breach email if a ticket gets no agent activity at all in time. The notification bell in the header mirrors these and a few other agent-facing emails (mentions, replies, low ratings) as in-app notifications, for anyone who'd rather glance at a badge than watch their inbox. Shows the running average satisfaction rating, time-to-first-response, and time-to-resolution once there's at least one of each. Save the current filter combo as a named view (personal to you, not shared) to jump back to it later. A **+ New ticket** button opens agent-initiated creation (see below).
+- `/dashboard` — all tickets, paginated, with counts by status (including **Waiting on Customer**, see below), a filter bar (status/priority/category/assignment/tag/**full-text search**), bulk status-change/reassignment/**tag add-or-remove** (select rows, apply to all of them), and a CSV export of whatever's currently filtered. Search is backed by SQLite FTS5 over subject/description (prefix-matched, multi-word AND), not a plain substring match — requester name/email search is still a plain substring match. Tickets still open past a priority-scaled threshold (Urgent ages fastest, Low slowest, counted in **business hours** — Mon-Fri 09:00-18:00, not raw calendar time, so a ticket filed Friday evening doesn't visibly age all weekend) are flagged on the dashboard *and* proactively emailed to whoever they're assigned to (see `SLA_CHECK_INTERVAL_MINUTES` below) — once per breach, not repeatedly. A separate, usually tighter **first-response target** (editable alongside the aging thresholds) triggers its own one-time breach email if a ticket gets no agent activity at all in time. The notification bell in the header mirrors these and a few other agent-facing emails (mentions, replies, low ratings) as in-app notifications, for anyone who'd rather glance at a badge than watch their inbox. Save the current filter combo as a named view (personal to you, not shared) to jump back to it later. A **+ New ticket** button opens agent-initiated creation (see below).
+
+  **Reports** live right alongside the ticket list, not a separate page — a sidebar next to it (below it on narrower screens) showing the running average satisfaction rating, time-to-first-response, time-to-resolution, and **reopen rate** (of tickets ever resolved, how many later got reopened — a rough proxy for "are we actually fixing things") as stat tiles, plus ticket volume for the last 30 days, a **satisfaction trend** chart by month, a per-**agent performance** table (resolved count, average resolution time, average CSAT), and breakdowns by category, status, and current agent workload. (`/dashboard/reports` still works as a link — it just redirects here now.)
 - `/dashboard/tickets/:id` — full ticket detail: set priority, change status (emails the requester if notifications are configured), assign/reassign to any active agent, link/change/unlink the related asset, add/remove freeform tags, and add notes — internal by default, or marked "visible to requester" to reply publicly (emailed to them too). Note and description text supports a small safe subset of markdown (`**bold**`, `*italic*`, `[links](https://...)`); `@firstnamelastname` in a note emails that agent directly. **Watch** a ticket you're not assigned to, to get the same reply notifications as the assignee. Setting status to **Waiting on Customer** pauses the aging/first-response clock for as long as it sits there — time spent waiting on the requester never counts against the team. A 1-2 star rating shows a banner here and emails the whole active team the moment it comes in. Shows the requester's other tickets, for context. Every change is logged automatically alongside manual notes in the ticket's activity feed. A **Possible duplicates** card suggests other open tickets with an overlapping subject (ranked by relevance, not an exact-phrase match) with a one-click merge. **Related tickets** links two genuinely separate-but-connected tickets to each other (symmetric — showing up on both) without merging them. **Merge** folds an actual duplicate into another ticket (activity/attachments/tags all move over; the duplicate closes and redirects here from then on). **Print / Save as PDF** opens a clean print-styled view (just the browser's own Print dialog, not a rendering dependency). **Requester data** is a GDPR export (JSON bundle of everything on file for that email) or erasure (redacts name/email/description/note-and-reply text across *all* of that requester's tickets, and deletes their attachment files — irreversible, confirmed before it runs).
 - `/dashboard/tickets/new` — agent-initiated ticket creation, for a phone call or walk-in. Unlike the public form, priority and assignment can be set immediately instead of always going through round-robin (and automation rules don't apply here — see `/` above). Optionally starts from a saved template (`/dashboard/templates`) that pre-fills category/subject/description.
 - `/dashboard/recurring` — templates that auto-create a new ticket on a fixed day interval (e.g. "monthly server check"), so a routine task doesn't depend on someone remembering to file it. Pause or delete a template any time; next-run date advances automatically each time it fires, catching up by at most one ticket even if the server was down a while.
@@ -75,7 +124,6 @@ The status page also shows the requester-visible conversation (agent replies + t
 - `/dashboard/kb` — write and publish/unpublish knowledge-base articles (see `/kb` above). Link one into a ticket note in one click from the note form.
 - `/dashboard/canned-responses` — a shared library of reusable note text any agent can insert into a note in one click.
 - `/dashboard/agents` — list of agents (active and deactivated) and a form to add new ones, plus deactivate/reactivate. All agents currently share one role — anyone logged in can manage any ticket and add other agents. Deactivating (never deleting, to keep their activity history intact) revokes login immediately, even for an already-open session, and excludes them from new assignments; you can't deactivate your own account or the last active agent.
-- `/dashboard/reports` — ticket volume for the last 30 days, time-to-first-response and time-to-resolution, a **reopen rate** (of tickets ever resolved, how many later got reopened — a rough proxy for "are we actually fixing things"), a **satisfaction trend** chart by month, a per-**agent performance** table (resolved count, average resolution time, average CSAT), and breakdowns by category, status, and current agent workload.
 - `/dashboard/settings` — editable aging thresholds and first-response targets (used for the "Aging" badge and both SLA emails, previously a hardcoded constant), plus links to:
   - `/dashboard/settings/webhooks` — POST a signed JSON payload (HMAC-SHA256 in an `X-Velv-Signature` header) to any URL on `ticket.created` / `ticket.status_changed` / `ticket.assigned`.
   - `/dashboard/settings/login-log` — every login attempt, successful or not, with IP and user agent — for spotting a compromised account.

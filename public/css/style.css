@@ -442,6 +442,11 @@ hr { border: none; border-top: 1px solid var(--border-subtle); margin: var(--spa
   padding: var(--space-6) var(--space-5) var(--space-8);
   min-height: calc(100vh - var(--header-h) - 160px);
 }
+/* A data-dense page (currently just the ticket-list + reports Dashboard)
+   opts into more room than the site's normal 1100px reading-width cap -
+   most pages here are forms or a handful of stacked cards that stay
+   comfortable at that width, but two real side-by-side panels want it. */
+.page-wide { max-width: 1680px; }
 
 /* ============================================================
    Footer — always Night Sky, regardless of the page theme
@@ -669,6 +674,31 @@ form.split-layout.stacked-form { display: grid; max-width: none; }
 @media (max-width: 800px) {
   .auth-split { grid-template-columns: 1fr; margin-top: 0; }
   .auth-split-brand { display: none; }
+}
+
+/* "Sign in with Microsoft" (see views/auth/login.ejs) - a full-width button
+   above the password form, with its own small divider beneath it. The logo
+   is a real, official 4-color Microsoft mark (public/img/microsoft-logo.svg)
+   via a plain <img>, not the app's usual monochrome .icon mask system -
+   recoloring it to currentColor would misrepresent the actual brand mark. */
+.button-block { display: flex; width: 100%; margin-top: 0; }
+.ms-logo { width: 1.1em; height: 1.1em; flex: 0 0 auto; }
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  color: var(--text-muted);
+  font-size: var(--fs-caption);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-overline);
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
 }
 
 /* The ticket-status lookup form stays a focused, narrow moment even
@@ -1059,6 +1089,23 @@ form.split-layout.stacked-form { display: grid; max-width: none; }
   margin-bottom: var(--space-5);
 }
 .ticket-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-5); align-items: start; }
+
+/* Dashboard: the ticket list (filters/bulk actions/table/pagination) sits
+   full width up top, exactly like the plain ticket-only dashboard always
+   looked. Reports live in their own full-width section below, separated
+   by a divider, so .report-row-3/.report-bento get the whole .page-wide
+   column to arrange their own card rows in - no squeezed sidebar. */
+.dashboard-reports { margin-top: var(--space-7); padding-top: var(--space-6); border-top: 1px solid var(--border-subtle); }
+.reports-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-5); }
+.dashboard-reports-title { margin-bottom: 0; }
+.report-range-form { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.report-range-form label { font-size: var(--fs-body-sm); color: var(--text-muted); }
+
+/* My day (see /dashboard/my-day): the "tickets you're watching" card sits
+   below the main assigned-to-me table with some breathing room - a plain
+   utility class since CSP has no unsafe-inline for style-src. */
+.watching-card { margin-top: var(--space-6); }
+
 @media (max-width: 800px) {
   .ticket-grid { grid-template-columns: 1fr; }
   .form-row { flex-direction: column; }
@@ -1129,17 +1176,38 @@ form.split-layout.stacked-form { display: grid; max-width: none; }
    chart here compares a single count across categories, not multiple
    overlapping series, so there's no need for a multi-hue categorical scheme.
    ============================================================ */
-.report-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); align-items: stretch; margin-bottom: var(--space-5); }
-@media (max-width: 900px) {
-  .report-row-2 { grid-template-columns: 1fr; }
+/* Three trend charts side by side (Tickets created / Satisfaction trend /
+   SLA compliance) - collapses at a wider breakpoint than the two-column
+   .report-bento row below, since three vbar-charts need more room each
+   before they get too narrow to read. */
+.report-row-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-5); align-items: stretch; margin-bottom: var(--space-5); }
+@media (max-width: 1100px) {
+  .report-row-3 { grid-template-columns: 1fr; }
 }
 
-.report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-5); align-items: stretch; }
-@media (max-width: 900px) {
-  .report-grid { grid-template-columns: 1fr; }
+/* Bento mosaic for the breakdown row: asymmetric column widths instead of
+   three equal thirds. By category gets the widest column (its labels run
+   longest - "Account & Access" - and it's usually the primary axis tickets
+   get triaged by); Status and Workload share the remaining, narrower space.
+   Deliberately NOT an uneven row-span (e.g. a tile spanning two rows) -
+   tried that first, but row count for all three is real ticket data (how
+   many categories/statuses/agents actually have tickets right now), not
+   a fixed list, so nothing guarantees Workload (or any of them) reliably
+   has more rows to fill a taller tile with - on a small team it's often
+   the shortest of the three, which just left a stretched tile with a lot
+   of dead centered space. Equal-height row via `align-items: stretch`
+   avoids that: every tile stays exactly as tall as its row's content.  */
+.report-bento {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: var(--space-5);
+  align-items: stretch;
 }
-.report-row-2 .card,
-.report-grid .card { margin-bottom: 0; display: flex; flex-direction: column; }
+@media (max-width: 900px) {
+  .report-bento { grid-template-columns: 1fr; }
+}
+.report-row-3 .card,
+.report-bento .card { margin-bottom: 0; display: flex; flex-direction: column; }
 
 .chart-eyebrow {
   font-size: var(--fs-overline);
@@ -1214,8 +1282,8 @@ form.split-layout.stacked-form { display: grid; max-width: none; }
 .chart-tip:hover::after { opacity: 1; visibility: visible; }
 
 /* A no-data placeholder sized to fill the same card real estate a populated
-   chart would - keeps a paired-up row (e.g. the two report-row-2 cards)
-   from looking lopsided when one side has data and the other doesn't. */
+   chart would - keeps a row of side-by-side cards (e.g. .report-row-3)
+   from looking lopsided when one has data and its neighbors don't. */
 .chart-empty {
   flex: 1;
   min-height: 100px;

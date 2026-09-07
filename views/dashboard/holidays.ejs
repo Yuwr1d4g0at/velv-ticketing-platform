@@ -1,0 +1,50 @@
+<%- include('../partials/header') %>
+<h1>Company holidays</h1>
+<p class="muted">Days the business-hours aging/SLA clock treats as non-working, exactly like a weekend, on top of the fixed Mon&ndash;Fri 09:00&ndash;18:00 window.</p>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">Date</th>
+        <th scope="col">Name</th>
+        <th scope="col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!holidays.length) { %>
+        <tr><td colspan="3" class="empty-row">No holidays configured yet.</td></tr>
+      <% } %>
+      <% holidays.forEach(function(h) { %>
+        <tr>
+          <td><%= h.date %></td>
+          <td><%= h.name %></td>
+          <td>
+            <form action="/dashboard/settings/holidays/<%= h.id %>/delete" method="POST" class="inline-form" data-confirm="Remove <%= h.name %> (<%= h.date %>) from the holiday calendar?">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button">Delete</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card card-medium">
+  <h2>Add a holiday</h2>
+  <% if (error) { %>
+    <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+  <% } %>
+  <form action="/dashboard/settings/holidays" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label for="date">Date</label>
+    <input type="date" id="date" name="date" required>
+
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" required maxlength="200" placeholder="e.g. Freedom Day">
+
+    <button type="submit" class="button-primary">Add holiday</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

@@ -20,6 +20,7 @@
 // rather than cached, since a settings change should take effect
 // immediately without a restart.
 const db = require("./db");
+const { holidaySet } = require("./holidays");
 
 const FALLBACK_DAYS = 7; // used only if a priority somehow has no row at all
 const BUSINESS_HOURS_START = 9; // 09:00
@@ -40,16 +41,30 @@ function currentFirstResponseThresholds() {
   return Object.fromEntries(rows.map((r) => [r.priority, r.hours]));
 }
 
-function isBusinessDay(date) {
+// Local (not UTC) Y-M-D key, matching how company_holidays.date is entered
+// and stored - all the surrounding date math here already works in the
+// server process's own local timezone (see the module comment above), so
+// this has to match that, not toISOString()'s UTC day which can shift near
+// midnight in some timezones.
+function localDateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function isBusinessDay(date, holidays) {
   const day = date.getDay();
-  return day !== 0 && day !== 6;
+  if (day === 0 || day === 6) return false;
+  return !holidays.has(localDateKey(date));
 }
 
 // Business hours between two Dates, restricted to one calendar day (`day`,
-// only its date part is used) - 0 outside Mon-Fri, otherwise the overlap
-// between that day's 09:00-18:00 window and [rangeStart, rangeEnd].
-function businessHoursOnDay(day, rangeStart, rangeEnd) {
-  if (!isBusinessDay(day)) return 0;
+// only its date part is used) - 0 outside Mon-Fri or on a company holiday,
+// otherwise the overlap between that day's 09:00-18:00 window and
+// [rangeStart, rangeEnd].
+function businessHoursOnDay(day, rangeStart, rangeEnd, holidays) {
+  if (!isBusinessDay(day, holidays)) return 0;
   const dayStart = new Date(day);
   dayStart.setHours(BUSINESS_HOURS_START, 0, 0, 0);
   const dayEnd = new Date(day);
@@ -61,11 +76,15 @@ function businessHoursOnDay(day, rangeStart, rangeEnd) {
 
 function businessHoursElapsed(startDate, endDate) {
   if (endDate <= startDate) return 0;
+  // Fetched once per call (not once per day inside the loop below) - still
+  // always a fresh read, so an edit to the holiday list takes effect on the
+  // very next calculation, without needing a caching/invalidation scheme.
+  const holidays = holidaySet();
   let total = 0;
   const cursor = new Date(startDate);
   cursor.setHours(0, 0, 0, 0);
   while (cursor <= endDate) {
-    total += businessHoursOnDay(cursor, startDate, endDate);
+    total += businessHoursOnDay(cursor, startDate, endDate, holidays);
     cursor.setDate(cursor.getDate() + 1);
   }
   return total;
@@ -112,4 +131,5 @@ module.exports = {
   businessHoursElapsed,
   agingHoursElapsed,
   BUSINESS_HOURS_PER_DAY,
+  FALLBACK_DAYS,
 };

@@ -4,9 +4,30 @@
 // content depends on which weekday it lands on. Fixed dates instead: known
 // Mondays/Fridays/weekends, so the assertions hold regardless of when the
 // suite runs.
-const { test } = require("node:test");
+//
+// businessHoursElapsed now reads the company_holidays table (see
+// src/holidays.js) once per call, so - same as every other test file that
+// touches src/db, and unlike this file's own past self - this needs an
+// isolated throwaway database, not whatever data/tickets.sqlite happens to
+// be on this machine. DB_PATH has to be set before src/aging (and the
+// src/db it requires) is ever require()'d, since node caches both by path.
+const path = require("path");
+const os = require("os");
+const fs = require("fs");
+const crypto = require("crypto");
+const dbPath = path.join(os.tmpdir(), `velv-aging-test-${crypto.randomBytes(8).toString("hex")}.sqlite`);
+process.env.DB_PATH = dbPath;
+
+const { test, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { businessHoursElapsed, isAgingTicket, agingHoursElapsed } = require("../src/aging");
+const holidays = require("../src/holidays");
+
+after(() => {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    fs.rmSync(dbPath + suffix, { force: true });
+  }
+});
 
 // 2026-09-07 is a Monday, 2026-09-14 is the following Monday - fixed
 // reference points so every case below is unambiguous.
@@ -14,6 +35,7 @@ const MON_9AM = new Date(2026, 8, 7, 9, 0, 0);
 const MON_10AM = new Date(2026, 8, 7, 10, 0, 0);
 const MON_6PM = new Date(2026, 8, 7, 18, 0, 0);
 const TUE_9AM = new Date(2026, 8, 8, 9, 0, 0);
+const WED_9AM = new Date(2026, 8, 9, 9, 0, 0);
 const FRI_5PM = new Date(2026, 8, 11, 17, 0, 0);
 const SAT_10AM = new Date(2026, 8, 12, 10, 0, 0);
 const SUN_10AM = new Date(2026, 8, 13, 10, 0, 0);
@@ -120,4 +142,24 @@ test("isAgingTicket: a ticket sitting in Waiting on Customer is never flagged as
     paused_hours: 0,
   };
   assert.equal(isAgingTicket(ancient, { Urgent: 1 }), false);
+});
+
+test("businessHoursElapsed: a company holiday on a weekday contributes nothing, same as a weekend", () => {
+  // Baseline, no holidays yet: Monday 9am -> Wednesday 9am is two full
+  // business days (Mon + Tue) = 18 hours.
+  assert.equal(businessHoursElapsed(MON_9AM, WED_9AM), 18);
+
+  holidays.addHoliday("2026-09-08", "Test Holiday"); // the Tuesday in between
+  const added = holidays.listHolidays().find((h) => h.date === "2026-09-08");
+  try {
+    // Tuesday is now a holiday - only Monday's 9 hours should count, same
+    // as if Tuesday had been a Saturday instead.
+    assert.equal(businessHoursElapsed(MON_9AM, WED_9AM), 9);
+  } finally {
+    holidays.deleteHoliday(added.id);
+  }
+
+  // Cleaned back up - back to the 18-hour baseline, confirming the holiday
+  // (not some other side effect) was what changed the result above.
+  assert.equal(businessHoursElapsed(MON_9AM, WED_9AM), 18);
 });

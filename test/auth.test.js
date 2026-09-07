@@ -76,3 +76,38 @@ test("logging out ends the session", async () => {
   assert.equal(afterLogout.status, 302);
   assert.equal(afterLogout.headers.get("location"), "/login");
 });
+
+// "Sign in with Microsoft" (src/msSso.js) is off by default - no
+// MS_TENANT_ID/MS_CLIENT_ID/MS_CLIENT_SECRET set in the test environment -
+// and isEnabled() re-checks those env vars on every call rather than
+// caching a decision made at startup, so a test can toggle them directly.
+// What's deliberately NOT covered here: the actual Microsoft round-trip
+// (redirect to login.microsoftonline.com, code exchange, ID token
+// verification) - that needs a real Entra tenant and would make the test
+// suite depend on live network access to Microsoft, which none of this
+// app's other tests do. Covered instead: the feature-flag behavior (off by
+// default, 404s cleanly, appears on the login page once configured) and
+// the allow-list rejection, which are the parts under this app's own
+// control.
+test("Sign in with Microsoft is hidden from the login page and its routes 404 when unconfigured", async () => {
+  const html = await (await client.get("/login")).text();
+  assert.doesNotMatch(html, /Sign in with Microsoft/);
+
+  assert.equal((await client.get("/auth/microsoft")).status, 404);
+  assert.equal((await client.get("/auth/microsoft/callback")).status, 404);
+});
+
+test("Sign in with Microsoft appears on the login page once MS_TENANT_ID/MS_CLIENT_ID/MS_CLIENT_SECRET are set", async () => {
+  process.env.MS_TENANT_ID = "test-tenant-id";
+  process.env.MS_CLIENT_ID = "test-client-id";
+  process.env.MS_CLIENT_SECRET = "test-client-secret";
+  try {
+    const html = await (await client.get("/login")).text();
+    assert.match(html, /Sign in with Microsoft/);
+    assert.match(html, /href="\/auth\/microsoft"/);
+  } finally {
+    delete process.env.MS_TENANT_ID;
+    delete process.env.MS_CLIENT_ID;
+    delete process.env.MS_CLIENT_SECRET;
+  }
+});

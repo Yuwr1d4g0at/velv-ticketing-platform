@@ -271,11 +271,18 @@ test("reports page shows the new CSAT trend, agent performance, and reopen-rate 
   const rateCsrf = extractCsrf(await ratePage.text());
   await client.postForm(`/rate/${ticket.rating_token}`, { rating: "5", comment: "Great!", _csrf: rateCsrf });
 
-  const reportsHtml = await (await client.get("/dashboard/reports")).text();
-  assert.match(reportsHtml, /Satisfaction trend/);
-  assert.match(reportsHtml, /Agent performance/);
-  assert.match(reportsHtml, /Reopen rate/);
-  assert.match(reportsHtml, /Batch Agent/);
+  // Reports now lives inside /dashboard itself (a sidebar next to the
+  // ticket list), not a separate page - /dashboard/reports just redirects
+  // there for anyone with an old bookmark/link.
+  const oldReportsUrl = await client.get("/dashboard/reports");
+  assert.equal(oldReportsUrl.status, 302);
+  assert.equal(oldReportsUrl.headers.get("location"), "/dashboard");
+
+  const dashboardHtml = await (await client.get("/dashboard")).text();
+  assert.match(dashboardHtml, /Satisfaction trend/);
+  assert.match(dashboardHtml, /Agent performance/);
+  assert.match(dashboardHtml, /Reopen rate/);
+  assert.match(dashboardHtml, /Batch Agent/);
 });
 
 test("a mention creates an in-app notification, and opening the bell marks it read", async () => {

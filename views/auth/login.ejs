@@ -11,10 +11,16 @@
     <% if (error) { %>
       <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
     <% } %>
+    <% if (ssoEnabled) { %>
+      <a href="/auth/microsoft" class="button-secondary button-block">
+        <img src="/img/microsoft-logo.svg" alt="" class="ms-logo"> Sign in with Microsoft
+      </a>
+      <div class="auth-divider"><span>or</span></div>
+    <% } %>
     <form action="/login" method="POST" class="stacked-form">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
       <label for="email">Email</label>
-      <input type="email" id="email" name="email" required autofocus>
+      <input type="email" id="email" name="email" required <%= ssoEnabled ? '' : 'autofocus' %>>
 
       <label for="password">Password</label>
       <input type="password" id="password" name="password" required>
