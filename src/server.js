@@ -10,8 +10,10 @@ const { checkSlaBreaches, checkFirstResponseBreaches } = require("./sla");
 const { checkWarrantyAlerts } = require("./warranty");
 const { runDueRecurringTickets } = require("./recurring");
 const { sendDueDigests } = require("./digest");
+const assetSync = require("./assetSync");
 const PORT = process.env.PORT || 3000;
 const SLA_CHECK_INTERVAL_MINUTES = parseInt(process.env.SLA_CHECK_INTERVAL_MINUTES, 10) || 15;
+const ASSET_SYNC_INTERVAL_HOURS = parseInt(process.env.ASSET_SYNC_INTERVAL_HOURS, 10) || 24;
 
 app.listen(PORT, () => {
   console.log(`Velv Ticketing Platform listening on http://localhost:${PORT}`);
@@ -31,6 +33,15 @@ function runPeriodicChecks() {
   checkWarrantyAlerts();
   runDueRecurringTickets();
   sendDueDigests();
+  // A no-op when Microsoft Graph isn't configured, and self-guarded to
+  // only actually hit SharePoint once ASSET_SYNC_INTERVAL_HOURS have
+  // passed since the last run - unlike the checks above, this one can
+  // genuinely fail (a real network call to Graph, not just a local DB
+  // query), so it's the one periodic check here that needs an explicit
+  // .catch rather than letting a rejection go unhandled.
+  if (assetSync.isDue(ASSET_SYNC_INTERVAL_HOURS)) {
+    assetSync.runSync().catch((err) => console.error("Asset sync failed:", err.message));
+  }
 }
 runPeriodicChecks();
 setInterval(runPeriodicChecks, SLA_CHECK_INTERVAL_MINUTES * 60 * 1000);

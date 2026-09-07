@@ -1,0 +1,46 @@
+<%- include('../partials/header') %>
+<h1>Asset inventory sync</h1>
+<p class="muted">Pulls the hardware inventory from SharePoint via Microsoft Graph, on a schedule - see the README for how the sync is scoped and which fields SharePoint owns.</p>
+
+<% if (!enabled) { %>
+  <div class="alert alert-info" role="status"><span class="icon icon-alert-triangle"></span>Microsoft Graph isn't configured (MS_TENANT_ID/MS_CLIENT_ID/MS_CLIENT_SECRET) - this sync is off entirely until it is.</div>
+<% } %>
+<% if (error) { %>
+  <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+<% } %>
+
+<form action="/dashboard/settings/asset-sync" method="POST" class="inline-form">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <button type="submit" class="button-primary" <%= enabled ? '' : 'disabled' %>>Sync now</button>
+</form>
+
+<div class="table-wrap table-wrap-spaced">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">Started</th>
+        <th scope="col">Finished</th>
+        <th scope="col">Created</th>
+        <th scope="col">Updated</th>
+        <th scope="col">Failed</th>
+        <th scope="col">Error</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!runs.length) { %>
+        <tr><td colspan="6" class="empty-row">No sync runs yet.</td></tr>
+      <% } %>
+      <% runs.forEach(function(r) { %>
+        <tr>
+          <td><%= r.started_at %></td>
+          <td><%= r.finished_at || '—' %></td>
+          <td><%= r.created_count != null ? r.created_count : '—' %></td>
+          <td><%= r.updated_count != null ? r.updated_count : '—' %></td>
+          <td><%= r.failed_count != null ? r.failed_count : '—' %></td>
+          <td class="asset-sync-error-col"><%= r.error || '—' %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+<%- include('../partials/footer') %>

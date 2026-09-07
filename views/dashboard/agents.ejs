@@ -16,7 +16,19 @@
     <tbody>
       <% agents.forEach(function(a) { %>
         <tr class="<%= a.active ? '' : 'row-inactive' %>">
-          <td><%= a.name %></td>
+          <td>
+            <div class="requester-line">
+              <% if (a.profile) { %>
+                <img class="directory-avatar" src="/dashboard/directory/photo?email=<%= encodeURIComponent(a.email) %>" alt="">
+              <% } %>
+              <div>
+                <%= a.name %>
+                <% if (a.profile && (a.profile.jobTitle || a.profile.department || a.profile.phone)) { %>
+                  <br><span class="muted"><%= [a.profile.jobTitle, a.profile.department].filter(Boolean).join(' · ') %><% if (a.profile.phone) { %><%= (a.profile.jobTitle || a.profile.department) ? ' · ' : '' %><%= a.profile.phone %><% } %></span>
+                <% } %>
+              </div>
+            </div>
+          </td>
           <td><%= a.email %></td>
           <td><%= a.open_count %></td>
           <td><%= a.created_at %></td>

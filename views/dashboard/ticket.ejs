@@ -8,9 +8,18 @@
 <div class="ticket-head">
   <div>
     <h1>#<%= ticket.id %> &middot; <%= ticket.subject %></h1>
-    <p class="muted">
-      From <%= ticket.requester_name %> (<%= ticket.requester_email %>) &middot; opened <%= ticket.created_at %>
-    </p>
+    <div class="requester-line">
+      <% if (requesterProfile) { %>
+        <img class="directory-avatar" src="/dashboard/directory/photo?email=<%= encodeURIComponent(ticket.requester_email) %>" alt="">
+      <% } %>
+      <p class="muted">
+        From <%= ticket.requester_name %> (<%= ticket.requester_email %>) &middot; opened <%= ticket.created_at %>
+        <% if (requesterProfile && (requesterProfile.jobTitle || requesterProfile.department || requesterProfile.phone)) { %>
+          <br>
+          <%= [requesterProfile.jobTitle, requesterProfile.department].filter(Boolean).join(' · ') %><% if (requesterProfile.phone) { %><%= (requesterProfile.jobTitle || requesterProfile.department) ? ' · ' : '' %><%= requesterProfile.phone %><% } %>
+        <% } %>
+      </p>
+    </div>
   </div>
   <div class="badge-group">
     <% if (aging) { %><span class="badge badge-aging">Aging</span><% } %>

@@ -111,6 +111,41 @@ MS_CLIENT_ID=<Application (client) ID>
 MS_CLIENT_SECRET=<the secret Value from step 6>
 ```
 
+### Directory enrichment & the SharePoint asset sync (also optional)
+
+Two more things reuse this same app registration and the same three env
+vars above, but need **Application permissions** (not just the Delegated
+sign-in scopes above) with **admin consent**, since they run without any
+one person being signed in:
+
+- **Directory enrichment** (`src/directory.js`) — shows a requester's or
+  agent's department, job title, phone, and photo (pulled from the tenant
+  directory, cached for 24h) on the ticket detail and Agents pages. Needs
+  the `User.Read.All` Application permission.
+- **Asset inventory sync** (`src/assetSync.js`,
+  `/dashboard/settings/asset-sync`) — pulls the Hardware Inventory
+  SharePoint list on a schedule (`ASSET_SYNC_INTERVAL_HOURS`, default 24;
+  or "Sync now" on that settings page) instead of the one-time manual CSV
+  import (`scripts/import-assets.js`). Needs `Sites.Read.All`.
+
+Both degrade silently (no enrichment shown, sync run logged as failed)
+until consent is granted — nothing breaks in the meantime. To grant it:
+
+1. On the app registration → **API permissions** → **Add a permission** →
+   **Microsoft Graph** → **Application permissions** (not Delegated).
+2. Add `User.Read.All` and `Sites.Read.All`.
+3. Click **Grant admin consent for &lt;your tenant&gt;** — permissions
+   alone don't do anything until this is clicked.
+
+The asset sync is a **one-way sync**: SharePoint's Asset Type, Status,
+Current Owner, Serial Number, Brand, and Purchase Date fields overwrite
+this app's `category`/`status`/`assigned_to_name`/`serial_number`/`vendor`/
+`purchase_date` on every run, for any asset already matched by its
+`HW-<source ID>` tag. `location` and `warranty_expires` have no SharePoint
+source and are never touched by a sync run. A manual edit made directly in
+this app's own Assets page to one of the SharePoint-sourced fields will be
+overwritten the next time the sync runs.
+
 Restart the app — the login page now shows a "Sign in with Microsoft"
 button above the password form, and the public request form (`/`) now
 requires signing in with Microsoft before it'll show the actual form.

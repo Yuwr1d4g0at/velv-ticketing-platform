@@ -30,6 +30,9 @@ const automation = require("../automation");
 const notifications = require("../notifications");
 const customFields = require("../custom-fields");
 const holidays = require("../holidays");
+const directory = require("../directory");
+const assetSync = require("../assetSync");
+const msGraph = require("../msGraph");
 const {
   ATTACHMENTS_DIR,
   SAFE_PREVIEW_TYPES,
@@ -475,7 +478,7 @@ router.post("/tickets/new", handleUpload("attachments"), verifyCsrf, (req, res) 
   res.redirect(`/dashboard/tickets/${result.lastInsertRowid}`);
 });
 
-router.get("/tickets/:id", (req, res) => {
+router.get("/tickets/:id", async (req, res) => {
   const ticket = getTicketOr404(res, req.params.id);
   if (!ticket) return;
 
@@ -537,6 +540,12 @@ router.get("/tickets/:id", (req, res) => {
     )
     .all(ticket.id);
 
+  // Skipped once this ticket's data has been erased (GDPR) - the stored
+  // requester_email is the shared redaction placeholder by then, not a
+  // real address, and looking it up would defeat the point of erasing it
+  // in the first place.
+  const requesterProfile = ticket.data_erased_at ? null : await directory.getProfile(ticket.requester_email);
+
   res.render("dashboard/ticket", {
     title: `Ticket #${ticket.id}`,
     ticket,
@@ -570,7 +579,25 @@ router.get("/tickets/:id", (req, res) => {
     isWatching: Boolean(
       db.prepare("SELECT 1 FROM ticket_watchers WHERE ticket_id = ? AND agent_id = ?").get(ticket.id, req.session.agentId)
     ),
+    requesterProfile,
   });
+});
+
+// A small avatar for any tenant email (agent or requester), backed by
+// src/directory.js's cache - not tied to any one ticket/agent id, since
+// the same person's photo can show up in more than one place on a page
+// (e.g. an agent's own name in the header, a requester's name on a
+// ticket). 404s (not a real error page - a broken <img> just shows
+// nothing) whenever there's no photo to show, same as attachment previews
+// elsewhere quietly no-op instead of erroring.
+router.get("/directory/photo", async (req, res) => {
+  const email = (req.query.email || "").trim().toLowerCase();
+  if (!email) return res.status(404).end();
+  const photo = await directory.getPhoto(email);
+  if (!photo) return res.status(404).end();
+  res.setHeader("Content-Type", photo.contentType);
+  res.setHeader("Cache-Control", "private, max-age=3600");
+  res.send(photo.buffer);
 });
 
 // Moves all activity/attachments/tags onto the target ticket, closes this
@@ -1749,7 +1776,33 @@ router.post("/settings/holidays/:id/delete", verifyCsrf, (req, res) => {
   res.redirect("/dashboard/settings/holidays");
 });
 
-router.get("/agents", (req, res) => {
+router.get("/settings/asset-sync", (req, res) => {
+  res.render("dashboard/asset-sync", {
+    title: "Asset inventory sync",
+    enabled: msGraph.isEnabled(),
+    runs: assetSync.recentRuns(),
+    error: null,
+  });
+});
+
+// Manual "sync now" - runs inline (a few hundred list items, well within a
+// normal request timeout) rather than kicking off a background job the
+// page would need to poll for.
+router.post("/settings/asset-sync", verifyCsrf, async (req, res) => {
+  try {
+    await assetSync.runSync();
+  } catch (err) {
+    return res.render("dashboard/asset-sync", {
+      title: "Asset inventory sync",
+      enabled: msGraph.isEnabled(),
+      runs: assetSync.recentRuns(),
+      error: err.message,
+    });
+  }
+  res.redirect("/dashboard/settings/asset-sync");
+});
+
+router.get("/agents", async (req, res) => {
   const agents = db
     .prepare(
       `SELECT agents.id, agents.name, agents.email, agents.active, agents.created_at,
@@ -1757,6 +1810,10 @@ router.get("/agents", (req, res) => {
        FROM agents ORDER BY agents.active DESC, agents.name`
     )
     .all();
+  // Directory enrichment (department/job title/phone, see src/directory.js)
+  // - looked up in parallel, one per agent, rather than one at a time.
+  const profiles = await Promise.all(agents.map((a) => directory.getProfile(a.email)));
+  agents.forEach((a, i) => (a.profile = profiles[i]));
   res.render("dashboard/agents", { title: "Agents", agents, error: null });
 });
 

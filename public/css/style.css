@@ -303,6 +303,9 @@ hr { border: none; border-top: 1px solid var(--border-subtle); margin: var(--spa
 }
 .main-nav .nav-cta:hover { background: var(--bg-subtle); }
 .main-nav .nav-user {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   color: var(--text-muted);
   font-size: var(--fs-body-sm);
   padding: var(--space-2) var(--space-3);
@@ -1060,6 +1063,8 @@ form.split-layout.stacked-form { display: grid; max-width: none; }
   box-shadow: var(--shadow-sm);
   margin-bottom: var(--space-6);
 }
+.table-wrap-spaced { margin-top: var(--space-5); }
+.asset-sync-error-col { max-width: 320px; white-space: normal; word-break: break-word; }
 .ticket-table { width: 100%; border-collapse: collapse; min-width: 720px; }
 .ticket-table th, .ticket-table td {
   text-align: left;
@@ -1103,6 +1108,14 @@ form.split-layout.stacked-form { display: grid; max-width: none; }
   margin-bottom: var(--space-5);
 }
 .ticket-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-5); align-items: start; }
+
+/* Requester directory enrichment (department/job title/phone/photo, see
+   src/directory.js) - a small circular avatar beside the existing "From
+   NAME (email)" line, both stay top-aligned since the line can wrap onto
+   two lines (name/email, then job title/department/phone). */
+.requester-line { display: flex; align-items: flex-start; gap: var(--space-3); }
+.directory-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; background: var(--bg-subtle); }
+.directory-avatar-sm { width: 22px; height: 22px; }
 
 /* Ticket detail sidebar: consolidated cards (Properties, Relationships)
    instead of one small single-field card each - same forms/routes as

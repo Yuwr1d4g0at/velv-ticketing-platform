@@ -48,7 +48,10 @@
                 <% } %>
               </div>
             </details>
-            <span class="nav-user">Signed in as <%= currentAgent.name %></span>
+            <span class="nav-user">
+              <img class="directory-avatar directory-avatar-sm" src="/dashboard/directory/photo?email=<%= encodeURIComponent(currentAgent.email) %>" alt="">
+              Signed in as <%= currentAgent.name %>
+            </span>
             <form action="/logout" method="POST" class="inline-form">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="link-button">Log out</button>

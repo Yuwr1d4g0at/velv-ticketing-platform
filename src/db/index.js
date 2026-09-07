@@ -364,6 +364,39 @@ db.exec(`
     name       TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Cached Microsoft Graph directory lookups (department/job title/phone,
+  -- and a photo if one's on file) for both agents and requesters, keyed by
+  -- email - see src/directory.js. A cache, not a live lookup on every page
+  -- view: Graph app-only calls add real latency, so a ticket/agent page
+  -- reads this table first and only re-fetches once fetched_at is stale
+  -- (CACHE_TTL_HOURS in src/directory.js).
+  CREATE TABLE IF NOT EXISTS directory_cache (
+    email             TEXT PRIMARY KEY,
+    display_name      TEXT,
+    department        TEXT,
+    job_title         TEXT,
+    phone             TEXT,
+    photo_blob        BLOB,
+    photo_content_type TEXT,
+    found             INTEGER NOT NULL DEFAULT 1,
+    fetched_at        TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- History of the SharePoint asset inventory sync (see src/assetSync.js) -
+  -- both so /dashboard/settings/asset-sync has something to show, and so
+  -- the periodic checker (src/server.js) can tell whether a sync is
+  -- actually due yet without keeping that state only in memory (which
+  -- would forget on every restart and re-sync more often than intended).
+  CREATE TABLE IF NOT EXISTS asset_sync_runs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at    TEXT,
+    created_count  INTEGER,
+    updated_count  INTEGER,
+    failed_count   INTEGER,
+    error          TEXT
+  );
 `);
 
 // sla_thresholds starts empty on a fresh database (CREATE TABLE doesn't seed
