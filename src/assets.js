@@ -45,24 +45,52 @@ function assignable() {
     .all();
 }
 
-function all({ status = "", category = "", q = "" } = {}) {
-  let sql = "SELECT * FROM assets WHERE 1 = 1";
+// Shared between all()/count() below so the two can never quietly filter
+// differently from each other.
+function buildFilterWhere({ status = "", category = "", q = "" } = {}) {
+  let where = " WHERE 1 = 1";
   const params = [];
   if (ASSET_STATUSES.includes(status)) {
-    sql += " AND status = ?";
+    where += " AND status = ?";
     params.push(status);
   }
   if (ASSET_CATEGORIES.includes(category)) {
-    sql += " AND category = ?";
+    where += " AND category = ?";
     params.push(category);
   }
   if (q.trim()) {
-    sql += " AND (name LIKE ? OR asset_tag LIKE ? OR assigned_to_name LIKE ? OR serial_number LIKE ?)";
+    where += " AND (name LIKE ? OR asset_tag LIKE ? OR assigned_to_name LIKE ? OR serial_number LIKE ?)";
     const like = `%${q.trim()}%`;
     params.push(like, like, like, like);
   }
-  sql += " ORDER BY CASE status WHEN 'Retired' THEN 1 WHEN 'Lost' THEN 1 ELSE 0 END, name";
+  return { where, params };
+}
+
+// `pagination` is optional ({limit, offset}) - omitted entirely for CSV
+// export, which always needs every matching row regardless of what page
+// the dashboard list happens to be showing.
+function all(filters = {}, pagination = null) {
+  const { where, params } = buildFilterWhere(filters);
+  let sql = `SELECT * FROM assets${where} ORDER BY CASE status WHEN 'Retired' THEN 1 WHEN 'Lost' THEN 1 ELSE 0 END, name`;
+  if (pagination) {
+    sql += " LIMIT ? OFFSET ?";
+    return db.prepare(sql).all(...params, pagination.limit, pagination.offset || 0);
+  }
   return db.prepare(sql).all(...params);
+}
+
+function count(filters = {}) {
+  const { where, params } = buildFilterWhere(filters);
+  return db.prepare(`SELECT COUNT(*) AS c FROM assets${where}`).get(...params).c;
+}
+
+// Whole-inventory status counts for the Assets page's summary stat tiles -
+// deliberately independent of the current filters (the same convention the
+// ticket dashboard's own stat row uses), so switching a filter doesn't
+// make the tiles themselves look like they're describing something else.
+function countsByStatus() {
+  const rows = db.prepare("SELECT status, COUNT(*) AS count FROM assets GROUP BY status").all();
+  return Object.fromEntries(rows.map((r) => [r.status, r.count]));
 }
 
 function get(id) {
@@ -166,4 +194,4 @@ function activityForAsset(assetId) {
     .all(assetId);
 }
 
-module.exports = { assignable, all, get, create, update, ticketsForAsset, activityForAsset };
+module.exports = { assignable, all, count, countsByStatus, get, create, update, ticketsForAsset, activityForAsset };

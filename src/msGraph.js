@@ -114,4 +114,4 @@ async function fetchListItems(siteId, listId) {
   return items;
 }
 
-module.exports = { isEnabled, fetchUserProfile, fetchUserPhoto, resolveSiteId, resolveListId, fetchListItems };
+module.exports = { isEnabled, graphFetch, fetchUserProfile, fetchUserPhoto, resolveSiteId, resolveListId, fetchListItems };

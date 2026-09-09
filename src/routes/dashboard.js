@@ -1208,19 +1208,30 @@ router.post("/canned-responses/:id/delete", verifyCsrf, (req, res) => {
 router.get("/assets", (req, res) => {
   const { status = "", category = "", q = "" } = req.query;
   const filters = { status, category, q };
+
+  const totalCount = assets.count(filters);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const page = Math.min(Math.max(parseInt(req.query.page, 10) || 1, 1), totalPages);
+  const offset = (page - 1) * PAGE_SIZE;
+
   const cutoff = new Date(Date.now() + WARRANTY_ALERT_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const today = new Date().toISOString().slice(0, 10);
-  const items = assets.all(filters).map((a) => ({
+  const items = assets.all(filters, { limit: PAGE_SIZE, offset }).map((a) => ({
     ...a,
     warranty_expired: Boolean(a.warranty_expires && a.warranty_expires < today),
     warranty_expiring_soon: Boolean(a.warranty_expires && a.warranty_expires >= today && a.warranty_expires <= cutoff),
   }));
   res.render("dashboard/assets", {
     title: "Assets",
+    wide: true,
     items,
     filters,
     categories: ASSET_CATEGORIES,
     statuses: ASSET_STATUSES,
+    statusCounts: assets.countsByStatus(),
+    page,
+    totalPages,
+    totalCount,
     values: {},
     error: null,
     exportQuery: new URLSearchParams(Object.fromEntries(Object.entries(filters).filter(([, v]) => v))).toString(),
@@ -1232,10 +1243,15 @@ router.post("/assets", verifyCsrf, (req, res) => {
   if (result.error) {
     return res.status(400).render("dashboard/assets", {
       title: "Assets",
-      items: assets.all({}),
+      wide: true,
+      items: assets.all({}, { limit: PAGE_SIZE, offset: 0 }),
       filters: { status: "", category: "", q: "" },
       categories: ASSET_CATEGORIES,
       statuses: ASSET_STATUSES,
+      statusCounts: assets.countsByStatus(),
+      page: 1,
+      totalPages: Math.max(1, Math.ceil(assets.count({}) / PAGE_SIZE)),
+      totalCount: assets.count({}),
       values: req.body,
       error: result.error,
       exportQuery: "",

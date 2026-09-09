@@ -155,3 +155,27 @@ test("a retired asset is not offered on the public form but stays reachable in t
   assert.equal(stillReachable.status, 200);
   assert.match(await stillReachable.text(), /Retired/);
 });
+
+test("the Assets page paginates past one page and shows accurate status stat tiles", async () => {
+  // Enough new assets, all sharing one distinguishable name prefix, to push
+  // the total well past one page (PAGE_SIZE = 25) regardless of how many
+  // other tests in this file already created assets before this one runs.
+  for (let i = 0; i < 30; i++) {
+    await addAsset({ name: `[Pagination Test] Item ${i}`, category: "Peripheral", status: "Available" });
+  }
+
+  const page1Html = await (await client.get("/dashboard/assets")).text();
+  assert.match(page1Html, /Page 1 of \d+/);
+
+  const page2Html = await (await client.get("/dashboard/assets?page=2")).text();
+  assert.match(page2Html, /Page 2 of \d+/);
+
+  // The two pages shouldn't show an identical set of rows.
+  const page1Items = page1Html.match(/\[Pagination Test\] Item \d+/g) || [];
+  const page2Items = page2Html.match(/\[Pagination Test\] Item \d+/g) || [];
+  assert.notDeepEqual(page1Items, page2Items);
+
+  // A status with zero real assets anywhere in this test run shows an
+  // actual "0" tile, not a missing one.
+  assert.match(page1Html, /<span class="stat-count">0<\/span>\s*<span class="stat-label">Lost<\/span>/);
+});

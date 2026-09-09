@@ -1,6 +1,18 @@
 <%- include('../partials/header') %>
-<h1>Assets</h1>
-<p class="muted">Company equipment and software. Link a ticket to one from the ticket detail page, or the requester can pick one at submission.</p>
+<div class="dashboard-head">
+  <div class="dashboard-head-title">
+    <h1>Assets</h1>
+  </div>
+  <p class="muted">Company equipment and software. Link a ticket to one from the ticket detail page, or the requester can pick one at submission.</p>
+  <div class="stat-row">
+    <% statuses.forEach(function(s) { %>
+      <div class="stat-tile stat-tile-<%= s.replace(/\s+/g, '-').toLowerCase() %>">
+        <span class="stat-count"><%= statusCounts[s] || 0 %></span>
+        <span class="stat-label"><%= s %></span>
+      </div>
+    <% }) %>
+  </div>
+</div>
 
 <form action="/dashboard/assets" method="GET" class="filter-bar">
   <input type="text" name="q" placeholder="Search name, tag, owner, serial&hellip;" value="<%= filters.q %>">
@@ -26,38 +38,43 @@
   </a>
 </form>
 
-<div class="table-wrap">
-  <table class="ticket-table">
-    <thead>
-      <tr>
-        <th scope="col">Name</th>
-        <th scope="col">Tag</th>
-        <th scope="col">Category</th>
-        <th scope="col">Status</th>
-        <th scope="col">Assigned to</th>
-        <th scope="col">Location</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% if (!items.length) { %>
-        <tr><td colspan="6" class="empty-row">No assets match these filters.</td></tr>
-      <% } %>
-      <% items.forEach(function(a) { %>
-        <tr>
-          <td><a href="/dashboard/assets/<%= a.id %>"><%= a.name %></a></td>
-          <td><% if (a.asset_tag) { %><%= a.asset_tag %><% } else { %>&mdash;<% } %></td>
-          <td><%= a.category %></td>
-          <td>
-            <span class="badge badge-asset-status-<%= a.status.replace(/\s+/g, '-').toLowerCase() %>"><%= a.status %></span>
-            <% if (a.warranty_expired) { %><span class="badge badge-aging">Warranty expired</span><% } else if (a.warranty_expiring_soon) { %><span class="badge badge-aging">Warranty expiring</span><% } %>
-          </td>
-          <td><% if (a.assigned_to_name) { %><%= a.assigned_to_name %><% } else { %>&mdash;<% } %></td>
-          <td><% if (a.location) { %><%= a.location %><% } else { %>&mdash;<% } %></td>
-        </tr>
-      <% }) %>
-    </tbody>
-  </table>
-</div>
+<% if (!items.length) { %>
+  <p class="empty-row card">No assets match these filters.</p>
+<% } else { %>
+  <div class="asset-grid">
+    <% items.forEach(function(a) { %>
+      <a class="asset-card" href="/dashboard/assets/<%= a.id %>">
+        <div class="asset-card-top">
+          <span class="asset-card-category"><%= a.category %></span>
+          <span class="badge badge-asset-status-<%= a.status.replace(/\s+/g, '-').toLowerCase() %>"><%= a.status %></span>
+        </div>
+        <p class="asset-card-name"><%= a.name %></p>
+        <p class="asset-card-tag"><% if (a.asset_tag) { %><%= a.asset_tag %><% } else { %>No tag<% } %></p>
+        <% if (a.warranty_expired) { %><span class="badge badge-aging">Warranty expired</span><% } else if (a.warranty_expiring_soon) { %><span class="badge badge-aging">Warranty expiring</span><% } %>
+        <div class="asset-card-meta">
+          <span><% if (a.assigned_to_name) { %><%= a.assigned_to_name %><% } else { %>Unassigned<% } %></span>
+          <% if (a.location) { %><span><%= a.location %></span><% } %>
+        </div>
+      </a>
+    <% }) %>
+  </div>
+<% } %>
+
+<% if (totalPages > 1) { %>
+  <nav class="pagination">
+    <% if (page > 1) { %>
+      <a class="button-secondary" href="/dashboard/assets?<%= exportQuery %>&page=<%= page - 1 %>">&larr; Previous</a>
+    <% } else { %>
+      <span class="button-secondary" aria-disabled="true">&larr; Previous</span>
+    <% } %>
+    <span class="pagination-status">Page <%= page %> of <%= totalPages %> &middot; <%= totalCount %> asset<%= totalCount === 1 ? '' : 's' %></span>
+    <% if (page < totalPages) { %>
+      <a class="button-secondary" href="/dashboard/assets?<%= exportQuery %>&page=<%= page + 1 %>">Next &rarr;</a>
+    <% } else { %>
+      <span class="button-secondary" aria-disabled="true">Next &rarr;</span>
+    <% } %>
+  </nav>
+<% } %>
 
 <button
   type="button"
