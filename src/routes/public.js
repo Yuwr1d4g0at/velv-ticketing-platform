@@ -223,7 +223,7 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
     .prepare(
       `SELECT agents.id FROM agents
        LEFT JOIN tickets ON tickets.assigned_to = agents.id AND tickets.status IN ('Open', 'In Progress')
-       WHERE agents.active = 1 AND agents.department_id = ?
+       WHERE agents.active = 1 AND agents.is_admin = 0 AND agents.department_id = ?
        GROUP BY agents.id
        ORDER BY COUNT(tickets.id) ASC, agents.id ASC
        LIMIT 1`
