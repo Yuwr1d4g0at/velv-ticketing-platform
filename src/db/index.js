@@ -419,7 +419,7 @@ db.exec(`
     error          TEXT
   );
 
-  -- Departments: IT/HR/Facilities/Finance to start, but agent-configurable
+  -- Departments: IT/HR/Legal/Marketing to start, but agent-configurable
   -- from /dashboard/settings/departments (see src/departments.js) rather
   -- than a hardcoded constant - a team's own structure is exactly the kind
   -- of thing that changes over time. Never hard-deleted (retire via the
@@ -480,7 +480,7 @@ if (firstResponseThresholdCount === 0) {
 // IT-flavored categories anyway, so defaulting to IT is consistent, not
 // arbitrary, and it's exactly what keeps every pre-existing test/fixture
 // (all of which use only those five original categories) working unchanged.
-const DEFAULT_DEPARTMENTS = ["IT", "HR", "Facilities", "Finance"];
+const DEFAULT_DEPARTMENTS = ["IT", "HR", "Legal", "Marketing"];
 const departmentCount = db.prepare("SELECT COUNT(*) AS c FROM departments").get().c;
 if (departmentCount === 0) {
   const insertDept = db.prepare("INSERT INTO departments (name) VALUES (?)");
@@ -490,8 +490,8 @@ if (departmentCount === 0) {
 const DEFAULT_CATEGORIES = {
   IT: ["Hardware", "Software", "Network", "Account & Access", "Other"],
   HR: ["Onboarding", "Benefits", "Employee Relations"],
-  Facilities: ["Facilities Request", "Maintenance"],
-  Finance: ["Expense Report", "Invoicing"],
+  Legal: ["Contract Review", "Compliance", "NDA / Confidentiality", "Litigation & Disputes"],
+  Marketing: ["Campaign Request", "Content & Design", "Brand Assets", "Event Support"],
 };
 const categoryCount = db.prepare("SELECT COUNT(*) AS c FROM categories").get().c;
 if (categoryCount === 0) {

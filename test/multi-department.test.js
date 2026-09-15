@@ -448,11 +448,15 @@ test("departments and categories settings page lists seeded departments and can 
   assert.match(html, /HR/);
   const csrf = extractCsrf(html);
 
-  const res = await adminClient.postForm("/dashboard/settings/departments", { name: "Legal", _csrf: csrf });
+  // "Operations" rather than "Legal"/"Marketing" - those are now seeded by
+  // default (see DEFAULT_DEPARTMENTS in src/db/index.js), so creating one of
+  // them here would collide with the name-uniqueness check instead of
+  // testing this route.
+  const res = await adminClient.postForm("/dashboard/settings/departments", { name: "Operations", _csrf: csrf });
   assert.equal(res.status, 302);
 
   const d = db();
-  const row = d.prepare("SELECT id FROM departments WHERE name = ?").get("Legal");
+  const row = d.prepare("SELECT id FROM departments WHERE name = ?").get("Operations");
   d.close();
   assert.ok(row, "the new department should have been created");
 });
