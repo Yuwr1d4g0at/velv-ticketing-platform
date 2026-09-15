@@ -1,4 +1,8 @@
-const CATEGORIES = ["Hardware", "Software", "Network", "Account & Access", "Other"];
+// Ticket categories used to be a flat constant here. They're now
+// department-scoped, editable rows in the categories table instead - see
+// src/departments.js (categoryNames() / categoriesByDepartment()), which is
+// what every former CATEGORIES.includes(...)/CATEGORIES.forEach(...) call
+// site now uses.
 const PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 // "Waiting on Customer" pauses the aging/SLA clock for as long as a ticket
 // sits in it - see src/aging.js's paused_hours accounting.
@@ -16,7 +20,6 @@ const ASSET_CATEGORIES = ["Laptop", "Desktop", "Monitor", "Phone", "Server", "Ne
 const ASSET_STATUSES = ["Available", "Reserved", "In Use", "In Storage", "Under Repair", "Retired", "Lost"];
 
 module.exports = {
-  CATEGORIES,
   PRIORITIES,
   STATUSES,
   PAGE_SIZE,

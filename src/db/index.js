@@ -418,6 +418,34 @@ db.exec(`
     failed_count   INTEGER,
     error          TEXT
   );
+
+  -- Departments: IT/HR/Facilities/Finance to start, but agent-configurable
+  -- from /dashboard/settings/departments (see src/departments.js) rather
+  -- than a hardcoded constant - a team's own structure is exactly the kind
+  -- of thing that changes over time. Never hard-deleted (retire via the
+  -- active column, same philosophy as agents/assets) so a department that
+  -- already has agents/categories pointing at it can't be yanked out from
+  -- under them.
+  CREATE TABLE IF NOT EXISTS departments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE,
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Ticket categories, now department-scoped (each belongs to exactly one
+  -- department) - replaces the flat CATEGORIES constant this app used to
+  -- have. ON DELETE RESTRICT: a department that still has categories
+  -- pointing at it can't be deleted out from under them (deactivate the
+  -- department instead, same pattern as everywhere else).
+  CREATE TABLE IF NOT EXISTS categories (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL UNIQUE,
+    department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_categories_department_id ON categories(department_id);
 `);
 
 // sla_thresholds starts empty on a fresh database (CREATE TABLE doesn't seed
@@ -439,6 +467,40 @@ if (firstResponseThresholdCount === 0) {
   const insertFrThreshold = db.prepare("INSERT INTO first_response_thresholds (priority, hours) VALUES (?, ?)");
   for (const [priority, hours] of Object.entries(DEFAULT_FIRST_RESPONSE_HOURS)) {
     insertFrThreshold.run(priority, hours);
+  }
+}
+
+// Seed departments + their categories the very first time (empty tables) -
+// see src/departments.js. IT is inserted first so it lands on id 1: every
+// migration below that back-fills a department for existing rows
+// (agents.department_id in particular) points at IT by default, because
+// every category that existed before this feature (Hardware/Software/
+// Network/Account & Access/Other) is seeded as an IT category right below -
+// an agent or ticket that predates departments entirely only ever touched
+// IT-flavored categories anyway, so defaulting to IT is consistent, not
+// arbitrary, and it's exactly what keeps every pre-existing test/fixture
+// (all of which use only those five original categories) working unchanged.
+const DEFAULT_DEPARTMENTS = ["IT", "HR", "Facilities", "Finance"];
+const departmentCount = db.prepare("SELECT COUNT(*) AS c FROM departments").get().c;
+if (departmentCount === 0) {
+  const insertDept = db.prepare("INSERT INTO departments (name) VALUES (?)");
+  for (const name of DEFAULT_DEPARTMENTS) insertDept.run(name);
+}
+
+const DEFAULT_CATEGORIES = {
+  IT: ["Hardware", "Software", "Network", "Account & Access", "Other"],
+  HR: ["Onboarding", "Benefits", "Employee Relations"],
+  Facilities: ["Facilities Request", "Maintenance"],
+  Finance: ["Expense Report", "Invoicing"],
+};
+const categoryCount = db.prepare("SELECT COUNT(*) AS c FROM categories").get().c;
+if (categoryCount === 0) {
+  const departmentIdByName = Object.fromEntries(
+    db.prepare("SELECT id, name FROM departments").all().map((d) => [d.name, d.id])
+  );
+  const insertCategory = db.prepare("INSERT INTO categories (name, department_id) VALUES (?, ?)");
+  for (const [deptName, names] of Object.entries(DEFAULT_CATEGORIES)) {
+    for (const name of names) insertCategory.run(name, departmentIdByName[deptName]);
   }
 }
 
@@ -614,6 +676,95 @@ if (!ticketColumns9.some((c) => c.name === "first_response_alerted_at")) {
 const agentColumns2 = db.prepare("PRAGMA table_info(agents)").all();
 if (!agentColumns2.some((c) => c.name === "last_digest_at")) {
   db.exec("ALTER TABLE agents ADD COLUMN last_digest_at TEXT");
+}
+
+// Fifteenth migration: adds agents.department_id and agents.is_admin - see
+// src/departments.js. This one can't be a plain guarded ALTER TABLE ADD
+// COLUMN like every migration above it: SQLite refuses to ADD COLUMN with
+// a REFERENCES clause AND a non-NULL default on a table that already has
+// rows ("Cannot add a REFERENCES column with non-NULL default value") -
+// there'd be no way to validate that eagerly-backfilled default against the
+// parent table. And a non-NULL default is exactly what's needed here:
+// department_id defaults every existing/new agent to IT (id 1, guaranteed
+// to exist by the seeding above) instead of NULL - an agent with no
+// department would see nothing at all once ticket visibility is scoped by
+// department, which is a worse default for a database that predates this
+// feature than "assume IT" (every category that predates this feature is
+// itself seeded as an IT category, so this is the same call, applied
+// consistently). is_admin defaults to 0 (no REFERENCES clause, so it could
+// have been a plain ALTER TABLE, but it's rolled into the same rebuild
+// since both are landing together): admin is a real, visible, opt-in role
+// (see the Agents page), never something an agent quietly ends up with.
+//
+// This can't use the same rename-old-table-out-of-the-way shape as the
+// priority_change/requester_reply rebuilds above, because agents.id is a
+// foreign key TARGET for a dozen other tables (tickets, ticket_activity,
+// login_log, ...) and SQLite's ALTER TABLE RENAME rewrites every OTHER
+// table's REFERENCES clause to follow the renamed table to its new name -
+// so "RENAME agents TO agents_pre_department" would leave every one of
+// those tables' schemas pointing at "agents_pre_department", and dropping
+// that table afterward would leave them all referencing a table that no
+// longer exists. Instead: build the new table under its own name, drop the
+// OLD "agents" (every other table's REFERENCES agents(...) clause is
+// untouched text at this point, just briefly dangling since "agents"
+// doesn't exist), then rename the new table INTO "agents" - nothing else
+// in the database references "agents_new", so that rename touches no other
+// table's schema, and the moment it completes, every pre-existing
+// REFERENCES agents(...) clause resolves again, now against the new table.
+const agentColumns3 = db.prepare("PRAGMA table_info(agents)").all();
+if (!agentColumns3.some((c) => c.name === "department_id")) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec(`
+    CREATE TABLE agents_new (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      name           TEXT NOT NULL,
+      email          TEXT NOT NULL UNIQUE,
+      password_hash  TEXT NOT NULL,
+      active         INTEGER NOT NULL DEFAULT 1,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      last_digest_at TEXT,
+      department_id  INTEGER REFERENCES departments(id) ON DELETE SET NULL DEFAULT 1,
+      is_admin       INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT INTO agents_new (id, name, email, password_hash, active, created_at, last_digest_at)
+      SELECT id, name, email, password_hash, active, created_at, last_digest_at FROM agents;
+    DROP TABLE agents;
+    ALTER TABLE agents_new RENAME TO agents;
+  `);
+  db.exec("PRAGMA foreign_keys = ON");
+}
+
+// Sixteenth migration: guarded ALTER TABLE for tickets.confidential - see
+// the visibility check in src/departments.js. Even a same-department agent
+// can't see a confidential ticket unless they're its assignee or an admin;
+// department scoping still applies underneath this unchanged - a
+// confidential ticket outside an agent's department is exactly as invisible
+// as a non-confidential one.
+const ticketColumns10 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns10.some((c) => c.name === "confidential")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN confidential INTEGER NOT NULL DEFAULT 0");
+}
+
+// Seventeenth/eighteenth/nineteenth migrations: guarded ALTER TABLE for a
+// nullable department_id on kb_articles, canned_responses, automation_rules,
+// and webhooks - NULL means "shared/platform-wide" (today's behavior,
+// unchanged for anything created before this migration), a real id scopes
+// it to one department. See src/departments.js.
+const kbColumns = db.prepare("PRAGMA table_info(kb_articles)").all();
+if (!kbColumns.some((c) => c.name === "department_id")) {
+  db.exec("ALTER TABLE kb_articles ADD COLUMN department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL");
+}
+const cannedColumns = db.prepare("PRAGMA table_info(canned_responses)").all();
+if (!cannedColumns.some((c) => c.name === "department_id")) {
+  db.exec("ALTER TABLE canned_responses ADD COLUMN department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL");
+}
+const automationColumns = db.prepare("PRAGMA table_info(automation_rules)").all();
+if (!automationColumns.some((c) => c.name === "department_id")) {
+  db.exec("ALTER TABLE automation_rules ADD COLUMN department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL");
+}
+const webhookColumns = db.prepare("PRAGMA table_info(webhooks)").all();
+if (!webhookColumns.some((c) => c.name === "department_id")) {
+  db.exec("ALTER TABLE webhooks ADD COLUMN department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL");
 }
 
 module.exports = db;
