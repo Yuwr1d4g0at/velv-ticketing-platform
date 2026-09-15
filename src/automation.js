@@ -6,13 +6,15 @@
 // surprising than useful for a "basic" tool.
 const db = require("./db");
 const { addTagToTicket } = require("./tags");
+const departments = require("./departments");
 
 function all() {
   return db
     .prepare(
-      `SELECT automation_rules.*, agents.name AS assignee_name
+      `SELECT automation_rules.*, agents.name AS assignee_name, departments.name AS department_name
        FROM automation_rules
        LEFT JOIN agents ON agents.id = automation_rules.action_assigned_to
+       LEFT JOIN departments ON departments.id = automation_rules.department_id
        ORDER BY automation_rules.active DESC, automation_rules.name`
     )
     .all();
@@ -25,6 +27,10 @@ function create(fields) {
   const actionTag = (fields.action_tag || "").trim().slice(0, 30) || null;
   const actionPriority = (fields.action_priority || "").trim() || null;
   const actionAssignedTo = fields.action_assigned_to ? parseInt(fields.action_assigned_to, 10) : null;
+  // NULL means platform-wide (every rule that existed before this feature) -
+  // a real id scopes the rule to firing only for that one department's
+  // tickets, on top of whatever category/keyword condition it already has.
+  const departmentId = fields.department_id ? parseInt(fields.department_id, 10) : null;
 
   if (!name) return { error: "Name is required." };
   if (!conditionCategory && !conditionKeyword) {
@@ -37,10 +43,10 @@ function create(fields) {
   const result = db
     .prepare(
       `INSERT INTO automation_rules
-         (name, condition_category, condition_keyword, action_tag, action_priority, action_assigned_to)
-       VALUES (?, ?, ?, ?, ?, ?)`
+         (name, condition_category, condition_keyword, action_tag, action_priority, action_assigned_to, department_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(name, conditionCategory, conditionKeyword, actionTag, actionPriority, actionAssignedTo);
+    .run(name, conditionCategory, conditionKeyword, actionTag, actionPriority, actionAssignedTo, departmentId);
   return { id: result.lastInsertRowid };
 }
 
@@ -57,6 +63,11 @@ function matches(rule, ticket) {
   if (rule.condition_keyword) {
     const haystack = `${ticket.subject} ${ticket.description}`.toLowerCase();
     if (!haystack.includes(rule.condition_keyword.toLowerCase())) return false;
+  }
+  // A department-scoped rule (see create() above) only fires for tickets
+  // filed under that department's own categories.
+  if (rule.department_id && departments.departmentIdForCategory(ticket.category) !== rule.department_id) {
+    return false;
   }
   return true;
 }

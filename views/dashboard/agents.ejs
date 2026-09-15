@@ -7,6 +7,8 @@
       <tr>
         <th scope="col">Name</th>
         <th scope="col">Email</th>
+        <th scope="col">Department</th>
+        <th scope="col">Admin</th>
         <th scope="col">Open tickets assigned</th>
         <th scope="col">Added</th>
         <th scope="col">Status</th>
@@ -30,6 +32,25 @@
             </div>
           </td>
           <td><%= a.email %></td>
+          <td>
+            <form action="/dashboard/agents/<%= a.id %>/department" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <select name="department_id" aria-label="Department for <%= a.name %>" data-autosubmit>
+                <% departmentsList.forEach(function(d) { %>
+                  <option value="<%= d.id %>" <%= a.department_id === d.id ? 'selected' : '' %>><%= d.name %></option>
+                <% }) %>
+              </select>
+            </form>
+          </td>
+          <td>
+            <form action="/dashboard/agents/<%= a.id %>/admin" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <label class="checkbox-label">
+                <input type="checkbox" name="is_admin" value="1" <%= a.is_admin ? 'checked' : '' %> data-autosubmit aria-label="Admin (sees every department) for <%= a.name %>">
+                Admin
+              </label>
+            </form>
+          </td>
           <td><%= a.open_count %></td>
           <td><%= a.created_at %></td>
           <td><span class="badge <%= a.active ? 'badge-status-open' : '' %>"><%= a.active ? 'Active' : 'Deactivated' %></span></td>
@@ -54,6 +75,7 @@
 
 <div class="card card-narrow">
   <h2>Add an agent</h2>
+  <p class="muted">Admin bypasses department scoping everywhere - the only sanctioned way to see and act across every department. Grant it deliberately.</p>
   <% if (error) { %>
     <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
   <% } %>
@@ -67,6 +89,17 @@
 
     <label for="password">Temporary password (min 8 characters)</label>
     <input type="password" id="password" name="password" required minlength="8">
+
+    <label for="department_id">Department</label>
+    <select id="department_id" name="department_id" required>
+      <option value="" disabled selected>Choose one&hellip;</option>
+      <% departmentsList.forEach(function(d) { %><option value="<%= d.id %>"><%= d.name %></option><% }) %>
+    </select>
+
+    <label class="checkbox-label">
+      <input type="checkbox" name="is_admin" value="1">
+      Admin (sees and acts across every department)
+    </label>
 
     <button type="submit" class="button-primary">Add agent</button>
   </form>

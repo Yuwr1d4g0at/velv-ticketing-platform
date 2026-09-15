@@ -77,40 +77,52 @@ function formatMinutes(minutes) {
 // against logged_on (the date the work happened), not created_at (when the
 // entry was typed in), since picking a date range on a report is asking
 // "how much time went in during this window", not "when was the entry saved".
-function summaryByAgent(from, to) {
+// deptWhere is an optional {sql, params} fragment (see
+// departments.ticketVisibilitySql) that references `tickets` - every time
+// entry has a NOT NULL, ON DELETE CASCADE ticket_id, so joining to tickets
+// to apply it is always safe (no entry can outlive its ticket). Defaults to
+// no-op so every other caller (the ticket detail page's own time log,
+// which is about one specific already-visible ticket) is unaffected.
+function summaryByAgent(from, to, deptWhere = { sql: "", params: [] }) {
   return db
     .prepare(
       `SELECT COALESCE(agents.name, 'Unknown / removed agent') AS label, COUNT(*) AS entries, SUM(time_entries.minutes) AS minutes
        FROM time_entries
        LEFT JOIN agents ON agents.id = time_entries.agent_id
-       WHERE time_entries.logged_on >= ? AND time_entries.logged_on <= ?
+       JOIN tickets ON tickets.id = time_entries.ticket_id
+       WHERE time_entries.logged_on >= ? AND time_entries.logged_on <= ?${deptWhere.sql}
        GROUP BY time_entries.agent_id
        ORDER BY minutes DESC`
     )
-    .all(from, to);
+    .all(from, to, ...deptWhere.params);
 }
 
 // Top tickets by time logged within the range, not every ticket that has
 // any - a report card is for spotting where the time is actually going,
 // which a long tail of one-entry tickets would just bury.
-function summaryByTicket(from, to, limit = 10) {
+function summaryByTicket(from, to, deptWhere = { sql: "", params: [] }, limit = 10) {
   return db
     .prepare(
       `SELECT tickets.id, tickets.subject, COUNT(*) AS entries, SUM(time_entries.minutes) AS minutes
        FROM time_entries
        JOIN tickets ON tickets.id = time_entries.ticket_id
-       WHERE time_entries.logged_on >= ? AND time_entries.logged_on <= ?
+       WHERE time_entries.logged_on >= ? AND time_entries.logged_on <= ?${deptWhere.sql}
        GROUP BY time_entries.ticket_id
        ORDER BY minutes DESC
        LIMIT ?`
     )
-    .all(from, to, limit);
+    .all(from, to, ...deptWhere.params, limit);
 }
 
-function totalMinutesInRange(from, to) {
+function totalMinutesInRange(from, to, deptWhere = { sql: "", params: [] }) {
   return db
-    .prepare("SELECT COALESCE(SUM(minutes), 0) AS total FROM time_entries WHERE logged_on >= ? AND logged_on <= ?")
-    .get(from, to).total;
+    .prepare(
+      `SELECT COALESCE(SUM(time_entries.minutes), 0) AS total
+       FROM time_entries
+       JOIN tickets ON tickets.id = time_entries.ticket_id
+       WHERE time_entries.logged_on >= ? AND time_entries.logged_on <= ?${deptWhere.sql}`
+    )
+    .get(from, to, ...deptWhere.params).total;
 }
 
 module.exports = {

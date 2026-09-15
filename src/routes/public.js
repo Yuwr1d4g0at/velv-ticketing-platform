@@ -2,7 +2,7 @@ const express = require("express");
 const path = require("path");
 const rateLimit = require("express-rate-limit");
 const db = require("../db");
-const { CATEGORIES } = require("../constants");
+const departments = require("../departments");
 const { t } = require("../i18n");
 const { sendTicketCreatedEmail, sendAgentNotifiedOfReply, sendLowRatingEscalation } = require("../mailer");
 const { triggerWebhooks } = require("../webhooks");
@@ -134,7 +134,7 @@ router.get("/", (req, res) => {
   }
   res.render("public/request-form", {
     title: t(req.lang, "submit_request_title"),
-    categories: CATEGORIES,
+    categories: departments.categoryNames(),
     assets: assets.assignable(),
     customFieldsByCategory: customFields.byCategory(),
     subcategorySuggestions: subcategorySuggestions(),
@@ -176,7 +176,7 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
   if (!requester_email.trim() || !EMAIL_RE.test(requester_email.trim())) {
     errors.push(t(req.lang, "err_email_invalid"));
   }
-  if (!CATEGORIES.includes(category)) errors.push(t(req.lang, "err_category_invalid"));
+  if (!departments.isValidCategoryName(category)) errors.push(t(req.lang, "err_category_invalid"));
   if (!subject.trim()) errors.push(t(req.lang, "err_subject_required"));
   if (!description.trim()) errors.push(t(req.lang, "err_description_required"));
   if (subject.length > 200) errors.push(t(req.lang, "err_subject_too_long"));
@@ -192,7 +192,7 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
     deleteUploadedFiles(req.files);
     return res.status(400).render("public/request-form", {
       title: t(req.lang, "submit_request_title"),
-      categories: CATEGORIES,
+      categories: departments.categoryNames(),
       assets: assets.assignable(),
       customFieldsByCategory: customFields.byCategory(),
       subcategorySuggestions: subcategorySuggestions(),
@@ -208,21 +208,27 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
   // starts at the tickets.priority column's default ('Medium') until an
   // agent changes it.
   //
-  // Auto-assigned to whichever active agent currently has the fewest open
-  // (Open/In Progress) tickets, rather than left Unassigned - a simple
-  // self-balancing rotation rather than a strict round-robin counter (no
-  // extra state to keep in sync, and it self-corrects if someone's away).
-  // Falls back to Unassigned if there are no active agents at all.
+  // Auto-assigned to whichever active agent IN THIS TICKET'S DEPARTMENT
+  // currently has the fewest open (Open/In Progress) tickets, rather than
+  // left Unassigned - a simple self-balancing rotation rather than a strict
+  // round-robin counter (no extra state to keep in sync, and it
+  // self-corrects if someone's away). Scoped to the category's own
+  // department (not admins, who are overseers rather than frontline
+  // assignees for this purpose) so a ticket never auto-lands on someone
+  // outside the department it was actually filed under. Falls back to
+  // Unassigned if there are no active agents in that department at all,
+  // rather than reaching into a different one.
+  const ticketDepartmentId = departments.departmentIdForCategory(category);
   const nextAssignee = db
     .prepare(
       `SELECT agents.id FROM agents
        LEFT JOIN tickets ON tickets.assigned_to = agents.id AND tickets.status IN ('Open', 'In Progress')
-       WHERE agents.active = 1
+       WHERE agents.active = 1 AND agents.department_id = ?
        GROUP BY agents.id
        ORDER BY COUNT(tickets.id) ASC, agents.id ASC
        LIMIT 1`
     )
-    .get();
+    .get(ticketDepartmentId);
 
   const result = db
     .prepare(
@@ -262,12 +268,16 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
     subject: subject.trim(),
   }).catch((err) => console.error("Could not send ticket-created email:", err.message));
 
-  triggerWebhooks("ticket.created", {
-    ticket_id: result.lastInsertRowid,
-    subject: subject.trim(),
-    category,
-    requester_email: requester_email.trim().toLowerCase(),
-  });
+  triggerWebhooks(
+    "ticket.created",
+    {
+      ticket_id: result.lastInsertRowid,
+      subject: subject.trim(),
+      category,
+      requester_email: requester_email.trim().toLowerCase(),
+    },
+    ticketDepartmentId
+  );
 
   res.redirect(`/confirmation/${result.lastInsertRowid}`);
 });

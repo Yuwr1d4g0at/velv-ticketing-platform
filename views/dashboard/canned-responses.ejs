@@ -1,6 +1,6 @@
 <%- include('../partials/header') %>
 <h1>Canned responses</h1>
-<p class="muted">Reusable note text any agent can insert into a ticket note in one click. Shared by the whole team.</p>
+<p class="muted">Reusable note text any agent can insert into a ticket note in one click. Shared by the whole team unless scoped to one department below - a department-scoped response only shows up for that department's agents (and admins).</p>
 
 <div class="table-wrap">
   <table class="ticket-table">
@@ -8,17 +8,19 @@
       <tr>
         <th scope="col">Title</th>
         <th scope="col">Body</th>
+        <th scope="col">Department</th>
         <th scope="col"></th>
       </tr>
     </thead>
     <tbody>
       <% if (!responses.length) { %>
-        <tr><td colspan="3" class="empty-row">No canned responses yet.</td></tr>
+        <tr><td colspan="4" class="empty-row">No canned responses yet.</td></tr>
       <% } %>
       <% responses.forEach(function(r) { %>
         <tr>
           <td><%= r.title %></td>
           <td class="preserve-newlines"><%= r.body %></td>
+          <td><% if (r.department_name) { %><%= r.department_name %><% } else { %><span class="muted">Shared</span><% } %></td>
           <td>
             <form action="/dashboard/canned-responses/<%= r.id %>/delete" method="POST" class="inline-form">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -43,6 +45,12 @@
 
     <label for="body">Body</label>
     <textarea id="body" name="body" rows="4" required maxlength="5000" placeholder="Could you send a screenshot of the error message?"></textarea>
+
+    <label for="department_id">Department</label>
+    <select id="department_id" name="department_id">
+      <option value="">Shared (every department)</option>
+      <% departmentsList.forEach(function(d) { %><option value="<%= d.id %>"><%= d.name %></option><% }) %>
+    </select>
 
     <button type="submit" class="button-primary">Add response</button>
   </form>

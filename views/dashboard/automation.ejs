@@ -9,13 +9,14 @@
         <th scope="col">Name</th>
         <th scope="col">If</th>
         <th scope="col">Then</th>
+        <th scope="col">Department</th>
         <th scope="col">Status</th>
         <th scope="col"></th>
       </tr>
     </thead>
     <tbody>
       <% if (!rules.length) { %>
-        <tr><td colspan="5" class="empty-row">No automation rules yet.</td></tr>
+        <tr><td colspan="6" class="empty-row">No automation rules yet.</td></tr>
       <% } %>
       <% rules.forEach(function(r) { %>
         <tr class="<%= r.active ? '' : 'row-inactive' %>">
@@ -33,6 +34,7 @@
             <% if (r.assignee_name) actions.push('assign to ' + r.assignee_name); %>
             <%= actions.join(', ') %>
           </td>
+          <td><% if (r.department_name) { %><%= r.department_name %><% } else { %><span class="muted">Platform-wide</span><% } %></td>
           <td><span class="badge <%= r.active ? 'badge-status-open' : '' %>"><%= r.active ? 'Active' : 'Paused' %></span></td>
           <td>
             <form action="/dashboard/settings/automation/<%= r.id %>/toggle" method="POST" class="inline-form">
@@ -69,6 +71,12 @@
 
     <label for="condition_keyword">Subject or description contains</label>
     <input type="text" id="condition_keyword" name="condition_keyword" maxlength="100" placeholder="outage">
+
+    <label for="rule_department_id">Only for department (optional)</label>
+    <select id="rule_department_id" name="department_id">
+      <option value="">Platform-wide (every department)</option>
+      <% departmentsList.forEach(function(d) { %><option value="<%= d.id %>"><%= d.name %></option><% }) %>
+    </select>
 
     <h3>Then (at least one)</h3>
     <label for="action_tag">Add tag</label>

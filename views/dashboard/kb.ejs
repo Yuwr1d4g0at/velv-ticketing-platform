@@ -11,18 +11,20 @@
       <tr>
         <th scope="col">Title</th>
         <th scope="col">Category</th>
+        <th scope="col">Department</th>
         <th scope="col">Status</th>
         <th scope="col">Updated</th>
       </tr>
     </thead>
     <tbody>
       <% if (!articles.length) { %>
-        <tr><td colspan="4" class="empty-row">No articles yet.</td></tr>
+        <tr><td colspan="5" class="empty-row">No articles yet.</td></tr>
       <% } %>
       <% articles.forEach(function(a) { %>
         <tr>
           <td><a href="/dashboard/kb/<%= a.id %>/edit"><%= a.title %></a></td>
           <td><% if (a.category) { %><%= a.category %><% } else { %>&mdash;<% } %></td>
+          <td><% if (a.department_display_name) { %><%= a.department_display_name %><% } else { %><span class="muted">Shared</span><% } %></td>
           <td><span class="badge <%= a.published ? 'badge-status-open' : 'badge-status-closed' %>"><%= a.published ? 'Published' : 'Draft' %></span></td>
           <td><%= a.updated_at %></td>
         </tr>

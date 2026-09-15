@@ -23,6 +23,15 @@
       <% }) %>
     </select>
 
+    <label for="department_id">Department</label>
+    <select id="department_id" name="department_id">
+      <option value="">Shared (visible to every department)</option>
+      <% departmentsList.forEach(function(d) { %>
+        <option value="<%= d.id %>" <%= article && String(article.department_id) === String(d.id) ? 'selected' : '' %>><%= d.name %></option>
+      <% }) %>
+    </select>
+    <p class="field-hint">Only affects the dashboard's own Knowledge base list - the public help center at /kb always shows every published article regardless of department.</p>
+
     <label for="body">Body</label>
     <textarea id="body" name="body" rows="14" required maxlength="20000"><%= (article && article.body) || '' %></textarea>
     <p class="field-hint">Plain text, shown as written - no formatting yet.</p>

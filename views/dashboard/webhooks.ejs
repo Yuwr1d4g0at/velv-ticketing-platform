@@ -8,18 +8,20 @@
       <tr>
         <th scope="col">URL</th>
         <th scope="col">Events</th>
+        <th scope="col">Department</th>
         <th scope="col">Status</th>
         <th scope="col"></th>
       </tr>
     </thead>
     <tbody>
       <% if (!webhooks.length) { %>
-        <tr><td colspan="4" class="empty-row">No webhooks configured.</td></tr>
+        <tr><td colspan="5" class="empty-row">No webhooks configured.</td></tr>
       <% } %>
       <% webhooks.forEach(function(w) { %>
         <tr>
           <td class="overflow-wrap-anywhere"><%= w.url %></td>
           <td><%= w.events.split(',').join(', ') %></td>
+          <td><% if (w.department_name) { %><%= w.department_name %><% } else { %><span class="muted">Platform-wide</span><% } %></td>
           <td><span class="badge <%= w.active ? 'badge-status-open' : 'badge-status-closed' %>"><%= w.active ? 'Active' : 'Paused' %></span></td>
           <td>
             <form action="/dashboard/settings/webhooks/<%= w.id %>/toggle" method="POST" class="inline-form">
@@ -54,6 +56,12 @@
         <%= e %>
       </label>
     <% }) %>
+
+    <label for="webhook_department_id">Only for department (optional)</label>
+    <select id="webhook_department_id" name="department_id">
+      <option value="">Platform-wide (every department)</option>
+      <% departmentsList.forEach(function(d) { %><option value="<%= d.id %>"><%= d.name %></option><% }) %>
+    </select>
 
     <button type="submit" class="button-primary">Add webhook</button>
   </form>
