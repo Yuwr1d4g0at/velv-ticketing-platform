@@ -369,5 +369,62 @@
       </div>
     <% } %>
   </div>
+
+  <div class="card">
+    <p class="chart-eyebrow"><%= reportRange.label %></p>
+    <h2>Time tracked</h2>
+    <% if (!totalTimeMinutes) { %>
+      <div class="chart-empty">
+        <span class="icon icon-inbox"></span>
+        <p>No time logged in this window.</p>
+      </div>
+    <% } else { %>
+      <p class="muted">Total: <strong><%= formatMinutes(totalTimeMinutes) %></strong> across <%= timeByAgent.reduce(function(sum, a) { return sum + a.entries; }, 0) %> entries.</p>
+
+      <p class="card-subhead">By agent</p>
+      <div class="table-wrap table-wrap-spaced">
+        <table class="ticket-table">
+          <thead>
+            <tr>
+              <th scope="col">Agent</th>
+              <th scope="col">Entries</th>
+              <th scope="col">Time logged</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% timeByAgent.forEach(function(a) { %>
+              <tr>
+                <td><%= a.label %></td>
+                <td><%= a.entries %></td>
+                <td><%= formatMinutes(a.minutes) %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="card-subhead">By ticket (top <%= timeByTicket.length %>)</p>
+      <div class="table-wrap table-wrap-spaced">
+        <table class="ticket-table">
+          <thead>
+            <tr>
+              <th scope="col">Ticket</th>
+              <th scope="col">Entries</th>
+              <th scope="col">Time logged</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% timeByTicket.forEach(function(row) { %>
+              <tr>
+                <td><a href="/dashboard/tickets/<%= row.id %>">#<%= row.id %> &middot; <%= row.subject %></a></td>
+                <td><%= row.entries %></td>
+                <td><%= formatMinutes(row.minutes) %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
 </div>
 <%- include('../partials/footer') %>
