@@ -37,6 +37,9 @@
 
   <% if (ticket) { %>
     <hr>
+    <% if (typeof mergedNotice !== 'undefined' && mergedNotice) { %>
+      <div class="alert alert-info" role="status"><span class="icon icon-alert-triangle"></span><%= mergedNotice %></div>
+    <% } %>
     <div class="split-layout">
       <div class="split-layout-aside">
         <p class="split-legend"><%= t('ticket_hash') %><%= ticket.id %></p>

@@ -109,6 +109,35 @@ test("merging a ticket moves its activity/attachments/tags and redirects future 
   assert.match(revisitFollowed, /was merged into this one/);
 });
 
+test("a requester checking status (or replying) on a merged-away ticket is transparently redirected to the surviving ticket", async () => {
+  const sourceId = await submitTicket({ subject: "Wifi is down again", requester_email: "merge-requester@example.com" });
+  const targetId = await submitTicket({ subject: "Wifi is down", requester_email: "merge-requester@example.com" });
+
+  const sourcePage = await client.get(`/dashboard/tickets/${sourceId}`);
+  const csrf = extractCsrf(await sourcePage.text());
+  await client.postForm(`/dashboard/tickets/${sourceId}/merge`, { target_ticket_id: targetId, _csrf: csrf });
+
+  const statusHtml = await (
+    await client.postForm("/status", { ticket_id: sourceId, requester_email: "merge-requester@example.com" })
+  ).text();
+  assert.match(statusHtml, new RegExp(`Ticket #${sourceId} was merged into this one`));
+  assert.match(statusHtml, new RegExp(`Ticket #${targetId}`));
+
+  // Replying against the old (merged-away) ticket number lands the message
+  // on the surviving ticket, not on the closed, activity-less one.
+  const replyRes = await client.postForm("/status/reply", {
+    ticket_id: sourceId,
+    requester_email: "merge-requester@example.com",
+    message: "Still an issue, following up.",
+  });
+  assert.equal(replyRes.status, 200);
+  const replyHtml = await replyRes.text();
+  assert.match(replyHtml, /Still an issue, following up/);
+
+  const targetHtml = await (await client.get(`/dashboard/tickets/${targetId}`)).text();
+  assert.match(targetHtml, /Still an issue, following up/);
+});
+
 test("saved views: an agent can save, list, and delete their own view; can't delete another agent's", async () => {
   db.prepare("INSERT INTO agents (name, email, password_hash) VALUES (?, ?, ?)").run(
     "Other Agent",

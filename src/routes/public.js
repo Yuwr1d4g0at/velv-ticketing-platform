@@ -307,6 +307,7 @@ router.get("/status", requireRequesterSession, (req, res) => {
     attachments: [],
     conversation: [],
     error: null,
+    mergedNotice: null,
     requester: req.session.requester || null,
   });
 });
@@ -326,13 +327,14 @@ router.post("/status", statusLimiter, requireRequesterSession, (req, res) => {
       attachments: [],
       conversation: [],
       error: t(req.lang, "err_status_missing_fields"),
+      mergedNotice: null,
       requester: req.session.requester || null,
     });
   }
 
   const ticket = db
     .prepare(
-      `SELECT id, subject, description, category, priority, status, created_at, updated_at, requester_email
+      `SELECT id, subject, description, category, priority, status, created_at, updated_at, requester_email, merged_into_id
        FROM tickets WHERE id = ? AND requester_email = ?`
     )
     .get(id, requesterEmail);
@@ -344,6 +346,51 @@ router.post("/status", statusLimiter, requireRequesterSession, (req, res) => {
       attachments: [],
       conversation: [],
       error: t(req.lang, "err_status_not_found"),
+      mergedNotice: null,
+      requester: req.session.requester || null,
+    });
+  }
+
+  // An agent may have since merged this ticket into another one (see
+  // /tickets/:id/merge in dashboard.js) - the requester typed a number that
+  // still exists and is still theirs, it just isn't where the conversation
+  // lives anymore. Transparently show them the surviving ticket instead of
+  // a stale, activity-less Closed ticket, same as the dashboard does for an
+  // agent who opens the merged-away ticket's own URL.
+  if (ticket.merged_into_id) {
+    const target = db
+      .prepare(
+        `SELECT id, subject, description, category, priority, status, created_at, updated_at, requester_email
+         FROM tickets WHERE id = ? AND requester_email = ?`
+      )
+      .get(ticket.merged_into_id, requesterEmail);
+
+    if (!target) {
+      // The merge target belongs to a different requester (an agent merged
+      // across two different people's tickets) - nothing to redirect them
+      // into, so just tell them where their conversation went.
+      return res.render("public/status-check", {
+        title: t(req.lang, "check_status_title"),
+        ticket: null,
+        attachments: [],
+        conversation: [],
+        error: t(req.lang, "status_merged_elsewhere", ticket.merged_into_id),
+        mergedNotice: null,
+        requester: req.session.requester || null,
+      });
+    }
+
+    return res.render("public/status-check", {
+      title: t(req.lang, "check_status_title"),
+      ticket: target,
+      attachments: attachmentsForTicket(target.id, { requesterVisibleOnly: true }).map((a) => ({
+        ...a,
+        size_label: formatSize(a.size_bytes),
+        is_previewable: SAFE_PREVIEW_TYPES.has(a.mime_type),
+      })),
+      conversation: conversationForTicket(target.id),
+      error: null,
+      mergedNotice: t(req.lang, "status_merged_notice", ticket.id),
       requester: req.session.requester || null,
     });
   }
@@ -358,6 +405,7 @@ router.post("/status", statusLimiter, requireRequesterSession, (req, res) => {
     })),
     conversation: conversationForTicket(ticket.id),
     error: null,
+    mergedNotice: null,
     requester: req.session.requester || null,
   });
 });
@@ -376,9 +424,26 @@ router.post("/status/reply", statusLimiter, requireRequesterSession, (req, res) 
   // what a tampered request actually sends.
   const email = req.session.requester ? req.session.requester.email : (req.body.requester_email || "").trim().toLowerCase();
 
-  const ticket = db.prepare("SELECT * FROM tickets WHERE id = ? AND requester_email = ?").get(id, email);
+  let ticket = db.prepare("SELECT * FROM tickets WHERE id = ? AND requester_email = ?").get(id, email);
   if (!ticket) {
     return res.status(404).render("error", { title: "Not found", message: "That ticket does not exist." });
+  }
+
+  // Same merge redirect as GET/POST /status above - a reply typed against a
+  // ticket number that's since been merged away should land on the ticket
+  // that's actually still active, not on a Closed ticket no agent is
+  // looking at anymore.
+  let mergedNotice = null;
+  if (ticket.merged_into_id) {
+    const target = db.prepare("SELECT * FROM tickets WHERE id = ? AND requester_email = ?").get(ticket.merged_into_id, email);
+    if (!target) {
+      return res.status(404).render("error", {
+        title: "Ticket merged",
+        message: `This ticket was merged into ticket #${ticket.merged_into_id}. Please check its status using that ticket number instead.`,
+      });
+    }
+    mergedNotice = t(req.lang, "status_merged_notice", ticket.id);
+    ticket = target;
   }
 
   const body = message.trim().slice(0, 5000);
@@ -393,6 +458,7 @@ router.post("/status/reply", statusLimiter, requireRequesterSession, (req, res) 
     })),
       conversation: conversationForTicket(ticket.id),
       error: t(req.lang, "err_reply_empty"),
+      mergedNotice,
       requester: req.session.requester || null,
     });
   }
@@ -447,6 +513,7 @@ router.post("/status/reply", statusLimiter, requireRequesterSession, (req, res) 
     })),
     conversation: conversationForTicket(ticket.id),
     error: null,
+    mergedNotice,
     requester: req.session.requester || null,
   });
 });

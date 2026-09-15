@@ -64,6 +64,11 @@ const STRINGS = {
     submitting_as: "Submitting as",
     checking_status_as: "Checking status as",
     not_you_switch: "Not you? Switch account",
+    // Merge redirect (a requester looking up/replying to a ticket an agent
+    // has since merged into another one - see /status and /status/reply
+    // in src/routes/public.js)
+    status_merged_notice: "Ticket #%s was merged into this one - you're now viewing the current ticket.",
+    status_merged_elsewhere: "This ticket was merged into ticket #%s. Please check its status using that ticket number instead.",
     // Category display labels (stored value in the DB stays the fixed
     // English constant - see CATEGORY_LABELS below)
   },
@@ -120,6 +125,8 @@ const STRINGS = {
     submitting_as: "A enviar como",
     checking_status_as: "A consultar como",
     not_you_switch: "Não é você? Trocar de conta",
+    status_merged_notice: "O ticket #%s foi fundido com este - está agora a ver o ticket atual.",
+    status_merged_elsewhere: "Este ticket foi fundido com o ticket #%s. Consulte o estado usando esse número.",
   },
 };
 
@@ -134,8 +141,17 @@ const CATEGORY_LABELS = {
 
 const LANGUAGES = Object.keys(STRINGS);
 
-function t(lang, key) {
-  return (STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key;
+// Extra args, if given, fill in %s placeholders in order (e.g. a ticket
+// number) - every existing call site passes none, so this stays a no-op for
+// them. Kept this minimal rather than a real templating dependency, same
+// "hand-rolled, not a library" reasoning as the rest of this file.
+function t(lang, key, ...args) {
+  let str = (STRINGS[lang] && STRINGS[lang][key]) || STRINGS.en[key] || key;
+  if (args.length) {
+    let i = 0;
+    str = str.replace(/%s/g, () => args[i++]);
+  }
+  return str;
 }
 
 function categoryLabel(lang, category) {
