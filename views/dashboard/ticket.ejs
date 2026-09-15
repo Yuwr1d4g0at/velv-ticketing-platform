@@ -220,6 +220,45 @@
       </div>
     </div>
 
+    <div class="card" id="time">
+      <h2>Time tracked</h2>
+      <p class="muted">Total: <strong><%= formatMinutes(totalTimeMinutes) %></strong></p>
+
+      <% if (timeEntries.length) { %>
+        <ul class="requester-history">
+          <% timeEntries.forEach(function(e) { %>
+            <li>
+              <span><%= formatMinutes(e.minutes) %> &middot; <%= e.agent_name || 'Unknown agent' %> &middot; <%= e.logged_on %></span>
+              <% if (e.note) { %><span class="muted"> &mdash; <%= e.note %></span><% } %>
+              <form action="/dashboard/tickets/<%= ticket.id %>/time/<%= e.id %>/delete" method="POST" class="inline-form">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button type="submit" class="link-button">Remove</button>
+              </form>
+            </li>
+          <% }) %>
+        </ul>
+      <% } else { %>
+        <p class="muted">No time logged yet.</p>
+      <% } %>
+
+      <form action="/dashboard/tickets/<%= ticket.id %>/time" method="POST" class="stacked-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <div class="form-row">
+          <div>
+            <label for="time-minutes">Minutes spent</label>
+            <input type="number" id="time-minutes" name="minutes" min="1" max="1440" required placeholder="e.g. 45">
+          </div>
+          <div>
+            <label for="time-logged-on">Date</label>
+            <input type="date" id="time-logged-on" name="logged_on" value="<%= todayDate %>">
+          </div>
+        </div>
+        <label for="time-note">Note (optional)</label>
+        <input type="text" id="time-note" name="note" maxlength="500" placeholder="What did you work on?">
+        <button type="submit" class="button-secondary">Log time</button>
+      </form>
+    </div>
+
     <div class="card">
       <h2>Relationships</h2>
 

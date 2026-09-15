@@ -29,6 +29,7 @@ const recurring = require("../recurring");
 const automation = require("../automation");
 const notifications = require("../notifications");
 const customFields = require("../custom-fields");
+const timeEntries = require("../time-entries");
 const holidays = require("../holidays");
 const directory = require("../directory");
 const assetSync = require("../assetSync");
@@ -569,6 +570,10 @@ router.get("/tickets/:id", async (req, res) => {
     possibleDuplicates: ["Open", "In Progress"].includes(ticket.status) ? findPossibleDuplicates(ticket) : [],
     kbArticles: kb.publishedList().map((a) => ({ ...a, url: `${req.protocol}://${req.get("host")}/kb/${a.slug}` })),
     customFieldValues: customFields.valuesForTicket(ticket.id),
+    timeEntries: timeEntries.forTicket(ticket.id),
+    totalTimeMinutes: timeEntries.totalMinutesForTicket(ticket.id),
+    formatMinutes: timeEntries.formatMinutes,
+    todayDate: timeEntries.today(),
     watchers: db
       .prepare(
         `SELECT agents.id, agents.name FROM ticket_watchers
@@ -797,6 +802,29 @@ router.post("/tickets/:id/tags/:tagId/remove", verifyCsrf, (req, res) => {
   removeTagFromTicket(ticket.id, req.params.tagId);
   db.prepare("UPDATE tickets SET updated_at = datetime('now') WHERE id = ?").run(ticket.id);
   res.redirect(`/dashboard/tickets/${ticket.id}`);
+});
+
+// Manual time logging (see src/time-entries.js) - a whole-day+ or non-numeric
+// minutes value is rejected outright rather than silently clamped, same
+// "surprising input gets an error page, not a silent guess" call as the
+// /link route's invalid ticket number above.
+router.post("/tickets/:id/time", verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(res, req.params.id);
+  if (!ticket) return;
+
+  const result = timeEntries.create(ticket.id, req.session.agentId, req.body);
+  if (result.error) {
+    return res.status(400).render("error", { title: "Invalid time entry", message: result.error });
+  }
+  res.redirect(`/dashboard/tickets/${ticket.id}#time`);
+});
+
+router.post("/tickets/:id/time/:entryId/delete", verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(res, req.params.id);
+  if (!ticket) return;
+
+  timeEntries.remove(ticket.id, req.params.entryId);
+  res.redirect(`/dashboard/tickets/${ticket.id}#time`);
 });
 
 // Shared by the single-ticket status route and the bulk-status route below,
@@ -1565,6 +1593,14 @@ function buildReportsData(reportRange, unit) {
       return { month: bucket, pct, met, total, barClass: barClass("bar-h", pct, 100) };
     });
 
+  // Time tracked (see src/time-entries.js) within the same selected range,
+  // matched against logged_on (when the work happened) rather than the
+  // ticket's own created_at - a ticket opened months ago but worked on
+  // during this window should still show up here.
+  const timeByAgent = timeEntries.summaryByAgent(from, to);
+  const timeByTicket = timeEntries.summaryByTicket(from, to);
+  const totalTimeMinutes = timeEntries.totalMinutesInRange(from, to);
+
   return {
     volume: volume.map((v) => ({ ...v, barClass: barClass("bar-h", v.count, volumeMax) })),
     byCategory: withBarClass(byCategory, "bar-w"),
@@ -1576,6 +1612,10 @@ function buildReportsData(reportRange, unit) {
     everResolvedCount,
     reopenedCount,
     reopenRate,
+    timeByAgent,
+    timeByTicket,
+    totalTimeMinutes,
+    formatMinutes: timeEntries.formatMinutes,
   };
 }
 

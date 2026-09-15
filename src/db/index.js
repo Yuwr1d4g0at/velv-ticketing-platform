@@ -383,6 +383,27 @@ db.exec(`
     fetched_at        TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Manual time-tracking entries against a ticket (a start/stop timer is a
+  -- nice-to-have, not required for a first version - see src/time-entries.js
+  -- and the /tickets/:id/time routes in src/routes/dashboard.js). agent_id is
+  -- nullable with ON DELETE SET NULL, same reasoning as everywhere else an
+  -- agent is referenced - removing an agent should never take a ticket's
+  -- logged-time history down with them. logged_on is the date the WORK
+  -- happened (agent-editable, defaults to today), kept separate from
+  -- created_at (when the entry was actually typed in) so an agent logging
+  -- Monday's work on Friday afternoon still lands in Monday's report bucket.
+  CREATE TABLE IF NOT EXISTS time_entries (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id  INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    agent_id   INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+    minutes    INTEGER NOT NULL CHECK (minutes > 0),
+    note       TEXT,
+    logged_on  TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_time_entries_ticket_id ON time_entries(ticket_id);
+  CREATE INDEX IF NOT EXISTS idx_time_entries_logged_on ON time_entries(logged_on);
+
   -- History of the SharePoint asset inventory sync (see src/assetSync.js) -
   -- both so /dashboard/settings/asset-sync has something to show, and so
   -- the periodic checker (src/server.js) can tell whether a sync is
