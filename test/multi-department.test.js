@@ -471,3 +471,21 @@ test("the Agents page shows and can change an agent's department and admin flag"
   d.close();
   assert.equal(row.department_id, 1, "the agent's department should now be IT");
 });
+
+test("a non-admin agent can't view or manage the Agents page, including granting admin", async () => {
+  const getRes = await itClient.get("/dashboard/agents");
+  assert.equal(getRes.status, 403);
+
+  // Even without ever seeing the real form/CSRF token, confirm a forged
+  // request can't grant admin either - this is the exact gap being closed:
+  // is_admin used to be settable by any logged-in agent.
+  const homeCsrf = extractCsrf(await (await itClient.get("/dashboard")).text());
+  const targetId = agentId("hr-agent@example.com");
+  const postRes = await itClient.postForm(`/dashboard/agents/${targetId}/admin`, { is_admin: "1", _csrf: homeCsrf });
+  assert.equal(postRes.status, 403);
+
+  const d = db();
+  const row = d.prepare("SELECT is_admin FROM agents WHERE id = ?").get(targetId);
+  d.close();
+  assert.equal(row.is_admin, 0, "the target agent must not have been granted admin");
+});

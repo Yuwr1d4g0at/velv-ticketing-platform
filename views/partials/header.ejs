@@ -24,7 +24,9 @@
           <% if (typeof currentAgent !== 'undefined' && currentAgent) { %>
             <a href="/dashboard">Dashboard</a>
             <a href="/dashboard/assets">Assets</a>
-            <a href="/dashboard/agents">Agents</a>
+            <% if (currentAgent.is_admin) { %>
+              <a href="/dashboard/agents">Agents</a>
+            <% } %>
             <a href="/dashboard/canned-responses">Responses</a>
             <a href="/dashboard/kb">Knowledge base</a>
             <a href="/dashboard/settings">Settings</a>

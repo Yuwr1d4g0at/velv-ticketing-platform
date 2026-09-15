@@ -3,7 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const db = require("../db");
-const { requireAgent } = require("../middleware/auth");
+const { requireAgent, requireAdmin } = require("../middleware/auth");
 const { verifyCsrf } = require("../middleware/csrf");
 const { PRIORITIES, STATUSES, ASSET_CATEGORIES, ASSET_STATUSES, PAGE_SIZE } = require("../constants");
 const departments = require("../departments");
@@ -2164,6 +2164,12 @@ function agentsForList() {
     )
     .all();
 }
+
+// Agent management (list/create/department/admin/active) is admin-only -
+// is_admin is a real, deliberate role (see src/departments.js), not
+// something any logged-in agent should be able to grant themselves or
+// others via a stray POST.
+router.use("/agents", requireAdmin);
 
 router.get("/agents", async (req, res) => {
   const agents = agentsForList();

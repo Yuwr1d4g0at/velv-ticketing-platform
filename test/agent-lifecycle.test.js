@@ -11,12 +11,14 @@ before(async () => {
   client = makeClient(app.baseUrl);
 
   const db = new DatabaseSync(app.dbPath);
-  db.prepare("INSERT INTO agents (name, email, password_hash) VALUES (?, ?, ?)").run(
+  // is_admin: this suite exercises agent management (deactivate/reactivate),
+  // which is admin-only.
+  db.prepare("INSERT INTO agents (name, email, password_hash, is_admin) VALUES (?, ?, ?, 1)").run(
     "Main Agent",
     "main-agent@example.com",
     bcrypt.hashSync("correct-password", 4)
   );
-  db.prepare("INSERT INTO agents (name, email, password_hash) VALUES (?, ?, ?)").run(
+  db.prepare("INSERT INTO agents (name, email, password_hash, is_admin) VALUES (?, ?, ?, 1)").run(
     "Second Agent",
     "second-agent@example.com",
     bcrypt.hashSync("correct-password", 4)
