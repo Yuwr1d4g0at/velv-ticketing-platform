@@ -25,6 +25,8 @@
     <% if (departmentName) { %><span class="badge"><%= departmentName %></span><% } %>
     <% if (ticket.confidential) { %><span class="badge badge-aging">Confidential</span><% } %>
     <% if (aging) { %><span class="badge badge-aging">Aging</span><% } %>
+    <% if (ticket.approval_status === 'pending') { %><span class="badge badge-approval-pending">Pending Approval</span><% } %>
+    <% if (ticket.approval_status === 'rejected') { %><span class="badge badge-approval-rejected">Approval Rejected</span><% } %>
     <span class="badge badge-priority-<%= ticket.priority.toLowerCase() %>"><%= ticket.priority %></span>
     <span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span>
     <form action="/dashboard/tickets/<%= ticket.id %>/<%= isWatching ? 'unwatch' : 'watch' %>" method="POST" class="inline-form">
@@ -230,6 +232,37 @@
         <p class="field-hint">Hides this ticket from every same-department agent except its assignee and admins. Department scoping still applies underneath this - it never widens who can see the ticket, only narrows it further.</p>
       </div>
     </div>
+
+    <% if (requiresApproval || ticket.approval_status) { %>
+      <div class="card">
+        <h2>Approval</h2>
+        <% if (ticket.approval_status === 'pending') { %>
+          <p class="muted">Awaiting approval before this ticket can close.</p>
+          <% if (currentAgent.is_admin) { %>
+            <form action="/dashboard/tickets/<%= ticket.id %>/approval/approve" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="button-primary">Approve &amp; close</button>
+            </form>
+            <form action="/dashboard/tickets/<%= ticket.id %>/approval/reject" method="POST" class="stacked-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <label for="approval-note">Reviewer note (optional, shown to the assignee)</label>
+              <textarea id="approval-note" name="note" rows="2" maxlength="1000" placeholder="What needs to change before this can close?"></textarea>
+              <button type="submit" class="button-secondary">Reject</button>
+            </form>
+          <% } else { %>
+            <p class="muted">Only an admin can approve or reject.</p>
+          <% } %>
+        <% } else if (ticket.approval_status === 'rejected') { %>
+          <div class="alert alert-error" role="alert">
+            <span class="icon icon-alert-triangle"></span>Rejected - not ready to close<% if (ticket.approval_note) { %>: <%= ticket.approval_note %><% } %>. Select "Closed" again once it's addressed to resubmit for approval.
+          </div>
+        <% } else if (ticket.approval_status === 'approved') { %>
+          <p class="muted">Approved and closed.</p>
+        <% } else { %>
+          <p class="muted">Closing a ticket in this category requires an admin's approval - selecting "Closed" below will submit it instead of closing it directly.</p>
+        <% } %>
+      </div>
+    <% } %>
 
     <div class="card" id="time">
       <h2>Time tracked</h2>

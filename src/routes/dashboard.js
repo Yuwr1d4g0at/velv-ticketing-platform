@@ -658,6 +658,7 @@ router.get("/tickets/:id", async (req, res) => {
     assignableAssets: assets.assignable(),
     statuses: STATUSES,
     priorities: PRIORITIES,
+    requiresApproval: departments.categoryRequiresApproval(ticket.category),
     uploadHint: LIMITS_HINT,
     noteError: null,
     mergedFrom: req.query.merged_from ? parseInt(req.query.merged_from, 10) : null,
@@ -936,16 +937,50 @@ router.post("/tickets/:id/time/:entryId/delete", verifyCsrf, (req, res) => {
   res.redirect(`/dashboard/tickets/${ticket.id}#time`);
 });
 
+// The generic approval gate (see src/departments.js's categoryRequiresApproval
+// and the requires_approval column on categories): a category flagged this
+// way can't be closed directly. Instead of flipping status, this parks the
+// ticket in a pending decision - approval_status alongside the existing
+// status column, not a replacement for it - until an admin (the approver;
+// see the /tickets/:id/approval/* routes below - this app has no manager
+// hierarchy to hang approval on, so is_admin is it) approves or rejects.
+// Idempotent: resubmitting while already pending is a no-op, so hammering
+// the "Closed" option in the status dropdown doesn't spam the activity feed.
+function submitForApproval(ticket, agentId) {
+  if (ticket.approval_status === "pending") return;
+  db.prepare(
+    "UPDATE tickets SET approval_status = 'pending', approval_note = NULL, updated_at = datetime('now') WHERE id = ?"
+  ).run(ticket.id);
+  db.prepare(
+    `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'approval_change', ?)`
+  ).run(ticket.id, agentId, "Submitted for approval before closing - this category requires an admin's sign-off.");
+}
+
 // Shared by the single-ticket status route and the bulk-status route below,
 // so the two can never quietly diverge on what "changing status" means
 // (activity logging, the rating-token/email side effects on Resolved, etc).
 function applyStatusChange(ticket, status, agentId) {
   if (!STATUSES.includes(status) || status === ticket.status) return;
 
+  // A category flagged as requiring approval can't be closed directly -
+  // this reroutes the attempt into the pending-approval gate above instead
+  // of touching status at all. The approve action (below) calls back into
+  // this same function with approval_status already 'approved' on the
+  // ticket it passes in, so that path falls straight through to the normal
+  // close below rather than looping back into another pending request.
+  if (status === "Closed" && ticket.approval_status !== "approved" && departments.categoryRequiresApproval(ticket.category)) {
+    submitForApproval(ticket, agentId);
+    return;
+  }
+
   // Reopening clears any past SLA alert - a ticket that breaches, gets
   // fixed, and later reopens should be able to alert again rather than
   // staying silenced forever because it alerted once in a previous life.
+  // It also clears any past approval decision: a ticket that was approved
+  // and closed, then reopened, has to earn a fresh approval before it can
+  // close again rather than sailing through on last time's sign-off.
   const reopening = ["Open", "In Progress"].includes(status) && ["Resolved", "Closed"].includes(ticket.status);
+  const approvalResetSql = reopening && ticket.approval_status ? ", approval_status = NULL, approval_note = NULL" : "";
 
   // Aging-pause bookkeeping for "Waiting on Customer" (see src/aging.js):
   // entering it stamps waiting_since; leaving it folds the business hours
@@ -963,7 +998,7 @@ function applyStatusChange(ticket, status, agentId) {
   }
 
   db.prepare(
-    `UPDATE tickets SET status = ?, updated_at = datetime('now')${reopening ? ", sla_alerted_at = NULL" : ""}${pauseSql} WHERE id = ?`
+    `UPDATE tickets SET status = ?, updated_at = datetime('now')${reopening ? ", sla_alerted_at = NULL" : ""}${approvalResetSql}${pauseSql} WHERE id = ?`
   ).run(status, ...pauseParams, ticket.id);
   db.prepare(
     `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'status_change', ?)`
@@ -1016,6 +1051,60 @@ router.post("/tickets/:id/status", verifyCsrf, (req, res) => {
     return res.status(400).render("error", { title: "Invalid status", message: "That status is not valid." });
   }
   applyStatusChange(ticket, req.body.status, req.session.agentId);
+  res.redirect(`/dashboard/tickets/${ticket.id}`);
+});
+
+// Approve/reject a ticket parked in the pending-approval gate (see
+// submitForApproval/applyStatusChange above). Both admin-only: this app has
+// no manager-hierarchy concept to hang "approver" on, so is_admin - a real,
+// visible, opt-in role, same bypass used everywhere else in this feature -
+// is who can approve, full stop. Neither route is reachable for a ticket
+// that isn't actually pending, so there's no path to approve/reject a
+// decision that was never asked for.
+router.post("/tickets/:id/approval/approve", verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(req, res, req.params.id);
+  if (!ticket) return;
+  if (!res.locals.currentAgent.is_admin) {
+    return res.status(403).render("error", { title: "Admins only", message: "You need admin access to approve or reject a ticket." });
+  }
+  if (ticket.approval_status !== "pending") {
+    return res.status(400).render("error", { title: "Nothing to approve", message: "This ticket isn't waiting on an approval decision." });
+  }
+
+  db.prepare("UPDATE tickets SET approval_status = 'approved', approval_note = NULL WHERE id = ?").run(ticket.id);
+  db.prepare(
+    `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'approval_change', ?)`
+  ).run(ticket.id, req.session.agentId, "Approved for closing.");
+  // Reuses the normal close path (activity log, resolved/status-change email,
+  // webhooks) for the actual status flip - approval_status is already
+  // 'approved' on this in-memory copy, so applyStatusChange's own gate check
+  // falls through instead of looping back into another pending request.
+  applyStatusChange({ ...ticket, approval_status: "approved" }, "Closed", req.session.agentId);
+  res.redirect(`/dashboard/tickets/${ticket.id}`);
+});
+
+router.post("/tickets/:id/approval/reject", verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(req, res, req.params.id);
+  if (!ticket) return;
+  if (!res.locals.currentAgent.is_admin) {
+    return res.status(403).render("error", { title: "Admins only", message: "You need admin access to approve or reject a ticket." });
+  }
+  if (ticket.approval_status !== "pending") {
+    return res.status(400).render("error", { title: "Nothing to reject", message: "This ticket isn't waiting on an approval decision." });
+  }
+
+  // The reviewer note is optional and generic (any category can use it, not
+  // just Marketing's content-review flow this was built for) - shown back to
+  // the assignee on the ticket page so they know what to fix before
+  // resubmitting (selecting "Closed" again re-enters the pending gate).
+  const note = (req.body.note || "").trim().slice(0, 1000) || null;
+  db.prepare("UPDATE tickets SET approval_status = 'rejected', approval_note = ?, updated_at = datetime('now') WHERE id = ?").run(
+    note,
+    ticket.id
+  );
+  db.prepare(
+    `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'approval_change', ?)`
+  ).run(ticket.id, req.session.agentId, note ? `Rejected - not ready to close. Reviewer note: ${note}` : "Rejected - not ready to close.");
   res.redirect(`/dashboard/tickets/${ticket.id}`);
 });
 
@@ -1940,6 +2029,18 @@ router.post("/settings/departments/categories", verifyCsrf, (req, res) => {
 router.post("/settings/departments/categories/:id/toggle", verifyCsrf, (req, res) => {
   const row = db.prepare("SELECT active FROM categories WHERE id = ?").get(req.params.id);
   if (row) departments.setCategoryActive(req.params.id, !row.active);
+  res.redirect("/dashboard/settings/departments");
+});
+
+// Toggles the approval gate (src/departments.js's categoryRequiresApproval)
+// for one category - open to any agent, same as every other toggle on this
+// page (only Agents/is_admin management itself is admin-gated, see
+// requireAdmin above). Flipping it on doesn't touch any ticket already in
+// flight under that category; flipping it off leaves a ticket already
+// pending exactly where it is, awaiting an admin's approve/reject.
+router.post("/settings/departments/categories/:id/approval-toggle", verifyCsrf, (req, res) => {
+  const row = db.prepare("SELECT requires_approval FROM categories WHERE id = ?").get(req.params.id);
+  if (row) departments.setCategoryRequiresApproval(req.params.id, !row.requires_approval);
   res.redirect("/dashboard/settings/departments");
 });
 

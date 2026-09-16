@@ -478,7 +478,13 @@ router.post("/status/reply", statusLimiter, requireRequesterSession, (req, res) 
   ).run(ticket.id, body);
 
   if (["Resolved", "Closed"].includes(ticket.status)) {
-    db.prepare("UPDATE tickets SET status = 'Open', updated_at = datetime('now'), sla_alerted_at = NULL WHERE id = ?").run(ticket.id);
+    // Same approval reset as the agent-driven reopen path in dashboard.js's
+    // applyStatusChange: a ticket that was approved and closed, then
+    // reopened (here, by the requester replying), needs a fresh approval
+    // before it can close again rather than sailing through on last time's.
+    db.prepare(
+      "UPDATE tickets SET status = 'Open', updated_at = datetime('now'), sla_alerted_at = NULL, approval_status = NULL, approval_note = NULL WHERE id = ?"
+    ).run(ticket.id);
     db.prepare(
       `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, NULL, 'status_change', ?)`
     ).run(ticket.id, `Status changed from "${ticket.status}" to "Open" (reopened by requester reply).`);

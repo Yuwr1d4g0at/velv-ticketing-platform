@@ -49,12 +49,13 @@
         <th scope="col">Category</th>
         <th scope="col">Department</th>
         <th scope="col">Status</th>
+        <th scope="col">Requires approval to close</th>
         <th scope="col"></th>
       </tr>
     </thead>
     <tbody>
       <% if (!categoriesList.length) { %>
-        <tr><td colspan="4" class="empty-row">No categories yet.</td></tr>
+        <tr><td colspan="5" class="empty-row">No categories yet.</td></tr>
       <% } %>
       <% categoriesList.forEach(function(c) { %>
         <tr class="<%= c.active ? '' : 'row-inactive' %>">
@@ -62,9 +63,16 @@
           <td><%= c.department_name %></td>
           <td><span class="badge <%= c.active ? 'badge-status-open' : '' %>"><%= c.active ? 'Active' : 'Deactivated' %></span></td>
           <td>
+            <% if (c.requires_approval) { %><span class="badge badge-approval-pending">Required</span><% } else { %><span class="muted">No</span><% } %>
+          </td>
+          <td>
             <form action="/dashboard/settings/departments/categories/<%= c.id %>/toggle" method="POST" class="inline-form">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="link-button"><%= c.active ? 'Deactivate' : 'Reactivate' %></button>
+            </form>
+            <form action="/dashboard/settings/departments/categories/<%= c.id %>/approval-toggle" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button"><%= c.requires_approval ? 'Stop requiring approval' : 'Require approval to close' %></button>
             </form>
           </td>
         </tr>
@@ -72,6 +80,7 @@
     </tbody>
   </table>
 </div>
+<p class="field-hint">When a category requires approval, an agent trying to mark a ticket Closed in that category submits it for approval instead - see the Approval card on the ticket page. Only an admin can approve or reject.</p>
 
 <div class="card card-medium">
   <h2>Add a category</h2>
