@@ -178,6 +178,20 @@ function sendWarrantyExpiryDigest({ to, assets }) {
   );
 }
 
+// One digest per agent listing every ticket in their own department whose
+// reminder date just entered its alert window - see src/contractReminders.js
+// for when this fires and why it's scoped per-department (unlike
+// sendWarrantyExpiryDigest, which has no department to scope by).
+function sendContractReminderDigest({ to, tickets }) {
+  const lines = tickets.map((t) => `- #${t.id} (${t.category}): ${t.subject} - reminder date ${t.reminder_date}`).join("\n");
+  return send(
+    to,
+    `Reminder date approaching: ${tickets.length} ticket${tickets.length === 1 ? "" : "s"}`,
+    `${lines}\n\n${APP_URL ? `${APP_URL}/dashboard` : "Check the dashboard"} for details.\n\n` +
+      `Our Team. Remotely Yours.\nVelv`
+  );
+}
+
 module.exports = {
   enabled,
   sendTicketCreatedEmail,
@@ -191,4 +205,5 @@ module.exports = {
   sendMentionEmail,
   sendLowRatingEscalation,
   sendWarrantyExpiryDigest,
+  sendContractReminderDigest,
 };

@@ -2,36 +2,58 @@
 <h1>Ticket templates</h1>
 <p class="muted">Pre-filled starting points for <a href="/dashboard/tickets/new">agent-initiated tickets</a> - common recurring requests like "New hire onboarding" or "VPN access".</p>
 
-<div class="table-wrap">
-  <table class="ticket-table">
-    <thead>
-      <tr>
-        <th scope="col">Name</th>
-        <th scope="col">Category</th>
-        <th scope="col">Subject</th>
-        <th scope="col"></th>
-      </tr>
-    </thead>
-    <tbody>
-      <% if (!templates.length) { %>
-        <tr><td colspan="4" class="empty-row">No templates yet.</td></tr>
-      <% } %>
-      <% templates.forEach(function(t) { %>
-        <tr>
-          <td><%= t.name %></td>
-          <td><%= t.category %></td>
-          <td><%= t.subject %></td>
-          <td>
-            <form action="/dashboard/templates/<%= t.id %>/delete" method="POST" class="inline-form">
+<% if (!templates.length) { %>
+  <p class="empty-row">No templates yet.</p>
+<% } %>
+<% templates.forEach(function(t) { %>
+  <div class="card card-medium">
+    <h2><%= t.name %></h2>
+    <p class="muted"><%= t.category %> &middot; "<%= t.subject %>"</p>
+    <form action="/dashboard/templates/<%= t.id %>/delete" method="POST" class="inline-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button type="submit" class="link-button">Delete template</button>
+    </form>
+
+    <p class="card-subhead">Checklist</p>
+    <p class="field-hint">
+      A plain line is just a reminder. A line with a category also creates its own, completely
+      separate ticket in that department the moment this template is used - linked back to this
+      one, but never visible to any department beyond that link. Use "{name}" in the label to
+      substitute the requester's name entered on the new-ticket form.
+    </p>
+    <% if (t.checklistItems.length) { %>
+      <ul class="requester-history">
+        <% t.checklistItems.forEach(function(item) { %>
+          <li>
+            <%= item.label %>
+            <% if (item.spawn_category) { %><span class="badge badge-status-open">Spawns: <%= item.spawn_category %></span><% } %>
+            <form action="/dashboard/templates/<%= t.id %>/checklist-items/<%= item.id %>/delete" method="POST" class="inline-form">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <button type="submit" class="link-button">Delete</button>
+              <button type="submit" class="link-button">Remove</button>
             </form>
-          </td>
-        </tr>
-      <% }) %>
-    </tbody>
-  </table>
-</div>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
+    <form action="/dashboard/templates/<%= t.id %>/checklist-items" method="POST" class="property-row">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <label for="label-<%= t.id %>">Item</label>
+      <input type="text" id="label-<%= t.id %>" name="label" required maxlength="200" placeholder="Configure PC for {name}">
+      <label for="spawn_category-<%= t.id %>">Also create a ticket in&hellip;</label>
+      <select id="spawn_category-<%= t.id %>" name="spawn_category">
+        <option value="">Nothing - just a checklist line</option>
+        <% Object.keys(categoriesByDepartment).forEach(function(deptName) { %>
+          <optgroup label="<%= deptName %>">
+            <% categoriesByDepartment[deptName].forEach(function(c) { %>
+              <option value="<%= c.name %>"><%= c.name %></option>
+            <% }) %>
+          </optgroup>
+        <% }) %>
+      </select>
+      <button type="submit" class="button-secondary">Add item</button>
+    </form>
+  </div>
+<% }) %>
 
 <div class="card card-medium">
   <h2>Add a template</h2>

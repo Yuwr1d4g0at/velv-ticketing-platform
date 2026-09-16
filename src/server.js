@@ -8,6 +8,7 @@ if (!process.env.SESSION_SECRET) {
 const app = require("./app");
 const { checkSlaBreaches, checkFirstResponseBreaches } = require("./sla");
 const { checkWarrantyAlerts } = require("./warranty");
+const { checkContractReminders } = require("./contractReminders");
 const { runDueRecurringTickets } = require("./recurring");
 const { sendDueDigests } = require("./digest");
 const assetSync = require("./assetSync");
@@ -31,6 +32,7 @@ function runPeriodicChecks() {
   checkSlaBreaches();
   checkFirstResponseBreaches();
   checkWarrantyAlerts();
+  checkContractReminders();
   runDueRecurringTickets();
   sendDueDigests();
   // A no-op when Microsoft Graph isn't configured, and self-guarded to
