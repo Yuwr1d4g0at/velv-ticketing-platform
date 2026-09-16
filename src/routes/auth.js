@@ -4,6 +4,7 @@ const rateLimit = require("express-rate-limit");
 const db = require("../db");
 const { verifyCsrf } = require("../middleware/csrf");
 const msSso = require("../msSso");
+const totp = require("../totp");
 
 const router = express.Router();
 
@@ -13,6 +14,17 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: "Too many login attempts. Please wait a few minutes and try again.",
+});
+
+// A 6-digit TOTP code is a much smaller guess space than a password - its
+// own tight limiter, rather than sharing loginLimiter's budget (which a
+// normal password attempt already spent on the way to this second step).
+const twoFactorLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many codes tried. Please wait a few minutes and try again.",
 });
 
 router.get("/login", (req, res) => {
@@ -33,7 +45,7 @@ router.post("/login", loginLimiter, verifyCsrf, (req, res) => {
   const { email = "", password = "" } = req.body;
   const normalizedEmail = email.trim().toLowerCase();
   const agent = db
-    .prepare("SELECT id, name, email, password_hash FROM agents WHERE email = ? AND active = 1")
+    .prepare("SELECT id, name, email, password_hash, totp_enabled FROM agents WHERE email = ? AND active = 1")
     .get(normalizedEmail);
 
   const genericError = "Incorrect email or password.";
@@ -43,7 +55,62 @@ router.post("/login", loginLimiter, verifyCsrf, (req, res) => {
     return res.status(401).render("auth/login", { title: "Log in", error: genericError, ssoEnabled: msSso.isEnabled() });
   }
 
+  // 2FA enabled: the password alone isn't a completed login attempt yet -
+  // hold off on both logLoginAttempt (it would otherwise show "success" in
+  // the login log for someone who has the password but not the device) and
+  // req.session.agentId (this session stays unauthenticated) until the code
+  // on the next screen checks out too. See POST /login/2fa below, which is
+  // the only place either of those actually happens for this agent now.
+  if (agent.totp_enabled) {
+    req.session.pendingAgentId = agent.id;
+    return res.redirect("/login/2fa");
+  }
+
   logLoginAttempt(req, { email: normalizedEmail, agentId: agent.id, success: true });
+
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).render("error", { title: "Error", message: "Could not log in. Please try again." });
+    req.session.agentId = agent.id;
+    const redirectTo = req.session.redirectTo || "/dashboard";
+    delete req.session.redirectTo;
+    res.redirect(redirectTo);
+  });
+});
+
+// The second step of login for an agent with 2FA enabled - reached only via
+// a fresh req.session.pendingAgentId set by POST /login above (never a
+// direct is-2FA-required check on an arbitrary email, which would let
+// someone probe which addresses have 2FA on). Session isn't regenerated
+// here yet - that still only happens once, below, the moment the code
+// checks out - so a fixed/pre-existing session id never itself becomes an
+// authenticated one; it just carries the "waiting on a code" marker.
+router.get("/login/2fa", (req, res) => {
+  if (!req.session.pendingAgentId) return res.redirect("/login");
+  res.render("auth/login-2fa", { title: "Enter your 2FA code", error: null });
+});
+
+router.post("/login/2fa", twoFactorLimiter, verifyCsrf, (req, res) => {
+  const pendingId = req.session.pendingAgentId;
+  if (!pendingId) return res.redirect("/login");
+
+  const agent = db
+    .prepare("SELECT id, name, email, totp_secret FROM agents WHERE id = ? AND active = 1 AND totp_enabled = 1")
+    .get(pendingId);
+  if (!agent) {
+    // 2FA was disabled (or the account deactivated) between the password
+    // step and this one - nothing to verify a code against, so start over.
+    delete req.session.pendingAgentId;
+    return res.redirect("/login");
+  }
+
+  const code = req.body.code || "";
+  if (!totp.verifyToken(agent.totp_secret, code)) {
+    logLoginAttempt(req, { email: agent.email, agentId: agent.id, success: false });
+    return res.status(401).render("auth/login-2fa", { title: "Enter your 2FA code", error: "Incorrect code. Please try again." });
+  }
+
+  logLoginAttempt(req, { email: agent.email, agentId: agent.id, success: true });
+  delete req.session.pendingAgentId;
 
   req.session.regenerate((err) => {
     if (err) return res.status(500).render("error", { title: "Error", message: "Could not log in. Please try again." });

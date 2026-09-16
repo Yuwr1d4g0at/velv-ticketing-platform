@@ -35,6 +35,7 @@ const holidays = require("../holidays");
 const directory = require("../directory");
 const assetSync = require("../assetSync");
 const msGraph = require("../msGraph");
+const totp = require("../totp");
 const {
   ATTACHMENTS_DIR,
   SAFE_PREVIEW_TYPES,
@@ -725,6 +726,70 @@ router.get("/tickets/:id/print", (req, res) => {
     ticket,
     activity,
     asset: ticket.asset_id ? assets.get(ticket.asset_id) : null,
+  });
+});
+
+// The requester-visible half of a ticket's conversation - same query as
+// public.js's own conversationForTicket, kept as a small local copy here
+// rather than exported/shared: it's an 8-line query filtered to the two
+// requester-facing activity types ('reply' and 'requester_reply'), not
+// worth a cross-module dependency between the public and dashboard routers
+// for. Used only by the view-as-requester preview below.
+function conversationForTicket(ticketId) {
+  return db
+    .prepare(
+      `SELECT ticket_activity.*, agents.name AS agent_name
+       FROM ticket_activity
+       LEFT JOIN agents ON agents.id = ticket_activity.agent_id
+       WHERE ticket_id = ? AND type IN ('reply', 'requester_reply')
+       ORDER BY created_at ASC`
+    )
+    .all(ticketId);
+}
+
+// Admin-only, read-only preview of exactly what this ticket's requester
+// currently sees on the public status-check page (views/public/status-
+// check.ejs) - for debugging what a requester actually experiences, without
+// a real impersonated requester session/login. Renders that same template
+// with the same data public.js's own GET /status route would build for this
+// ticket, plus `preview: true`, which the template uses to swap the ticket-
+// lookup form and reply box for a banner and hide any way to act as the
+// requester (see the isPreview branches in that template).
+//
+// Gated on is_admin, not just any agent: this is a debugging tool, not a
+// normal agent workflow, and admin is this app's one deliberate escalation
+// path (see the file comment in src/departments.js) - not something to
+// extend to every agent just because it's read-only. getTicketOr404 still
+// runs first (an admin always passes it, per canSeeTicket, but it's the one
+// place a bad/missing :id 404s instead of throwing). Every use is logged as
+// ticket activity so it's auditable who previewed what, and when.
+router.get("/tickets/:id/view-as-requester", requireAdmin, (req, res) => {
+  const ticket = getTicketOr404(req, res, req.params.id);
+  if (!ticket) return;
+
+  db.prepare(
+    `INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'note', ?)`
+  ).run(ticket.id, req.session.agentId, `${res.locals.currentAgent.name} previewed this ticket as the requester.`);
+
+  res.render("public/status-check", {
+    title: `Ticket #${ticket.id} - viewing as requester`,
+    ticket,
+    attachments: attachmentsForTicket(ticket.id, { requesterVisibleOnly: true }).map((a) => ({
+      ...a,
+      size_label: formatSize(a.size_bytes),
+      // Never previewable/downloadable from here - see the isPreview branch
+      // in status-check.ejs, which lists attachments as plain text in
+      // preview mode rather than wiring up the public download/preview
+      // routes (those expect a real requester-owned session/request, which
+      // this deliberately isn't).
+      is_previewable: false,
+    })),
+    conversation: conversationForTicket(ticket.id),
+    error: null,
+    mergedNotice: null,
+    requester: { name: ticket.requester_name, email: ticket.requester_email },
+    preview: true,
+    previewBackUrl: `/dashboard/tickets/${ticket.id}`,
   });
 });
 
@@ -1888,6 +1953,71 @@ router.post("/settings", verifyCsrf, (req, res) => {
   res.redirect("/dashboard/settings");
 });
 
+// Optional TOTP two-factor login (see src/totp.js) - an agent's own account
+// setting, open to any agent (same as the rest of /settings, unlike
+// /agents below, which is is_admin-only). Setup is two steps: generate a
+// secret and show it (text + otpauth:// URI for manual entry - no QR-code
+// dependency, see the account-security feature notes), then require one
+// real code from it before anything is written to agents.totp_secret/
+// totp_enabled. The secret lives only in the session until that
+// verification succeeds - a secret nobody's confirmed they can generate
+// codes for would just lock the agent out the moment it went live.
+function renderSecurityPage(req, res, { status = 200, error = null, notice = null } = {}) {
+  const agent = db.prepare("SELECT totp_enabled FROM agents WHERE id = ?").get(req.session.agentId);
+  const pendingSecret = req.session.totpSetupSecret || null;
+  res.status(status).render("dashboard/security", {
+    title: "Two-factor authentication",
+    totpEnabled: Boolean(agent && agent.totp_enabled),
+    pendingSecret,
+    otpauthUri: pendingSecret ? totp.buildOtpauthUri(pendingSecret, { label: res.locals.currentAgent.email }) : null,
+    error,
+    notice,
+  });
+}
+
+router.get("/settings/security", (req, res) => {
+  renderSecurityPage(req, res);
+});
+
+router.post("/settings/security/2fa/setup", verifyCsrf, (req, res) => {
+  // Already on - nothing to (re-)set up until it's turned off first, which
+  // would otherwise let a stray double-submit generate (and show) a fresh
+  // secret while the old one is still the one actually protecting login.
+  if (res.locals.currentAgent.totp_enabled) return res.redirect("/dashboard/settings/security");
+  req.session.totpSetupSecret = totp.generateSecret();
+  res.redirect("/dashboard/settings/security");
+});
+
+router.post("/settings/security/2fa/cancel", verifyCsrf, (req, res) => {
+  delete req.session.totpSetupSecret;
+  res.redirect("/dashboard/settings/security");
+});
+
+router.post("/settings/security/2fa/verify", verifyCsrf, (req, res) => {
+  const pendingSecret = req.session.totpSetupSecret;
+  if (!pendingSecret) return res.redirect("/dashboard/settings/security");
+
+  if (!totp.verifyToken(pendingSecret, req.body.code || "")) {
+    return renderSecurityPage(req, res, { status: 400, error: "That code didn't match. Check your device's clock and try again." });
+  }
+
+  db.prepare("UPDATE agents SET totp_secret = ?, totp_enabled = 1 WHERE id = ?").run(pendingSecret, req.session.agentId);
+  delete req.session.totpSetupSecret;
+  renderSecurityPage(req, res, { notice: "Two-factor authentication is now on for your account." });
+});
+
+// Disabling requires the agent's current password, not just an active
+// session - a live session alone being enough to turn off the second
+// factor protecting it would defeat most of the point of having one.
+router.post("/settings/security/2fa/disable", verifyCsrf, (req, res) => {
+  const agent = db.prepare("SELECT id, password_hash FROM agents WHERE id = ?").get(req.session.agentId);
+  if (!bcrypt.compareSync(req.body.password || "", agent.password_hash)) {
+    return renderSecurityPage(req, res, { status: 400, error: "Incorrect password." });
+  }
+  db.prepare("UPDATE agents SET totp_secret = NULL, totp_enabled = 0 WHERE id = ?").run(agent.id);
+  renderSecurityPage(req, res, { notice: "Two-factor authentication has been turned off." });
+});
+
 // Departments + their categories (see src/departments.js) - the
 // configurable structure everything else in this feature (agent scoping,
 // auto-assignment, KB/canned-responses/automation/webhooks scoping,
@@ -2090,7 +2220,22 @@ router.get("/settings/login-log", (req, res) => {
        LIMIT 200`
     )
     .all();
-  res.render("dashboard/login-log", { title: "Login activity", entries });
+  // Admin actions on another agent's account (today: 2FA resets - see
+  // POST /agents/:id/reset-2fa below) shown alongside login attempts on
+  // this same page, rather than a separate one - both are "security events
+  // involving an agent account" audit trails, and this app already treats
+  // this page as the place to look for that.
+  const agentActivity = db
+    .prepare(
+      `SELECT agent_activity.*, target.name AS target_name, actor.name AS actor_name
+       FROM agent_activity
+       LEFT JOIN agents target ON target.id = agent_activity.target_agent_id
+       LEFT JOIN agents actor ON actor.id = agent_activity.actor_agent_id
+       ORDER BY agent_activity.created_at DESC
+       LIMIT 200`
+    )
+    .all();
+  res.render("dashboard/login-log", { title: "Login activity", entries, agentActivity });
 });
 
 router.get("/settings/holidays", (req, res) => {
@@ -2156,7 +2301,7 @@ function agentsForList() {
   return db
     .prepare(
       `SELECT agents.id, agents.name, agents.email, agents.active, agents.created_at,
-              agents.department_id, agents.is_admin, departments.name AS department_name,
+              agents.department_id, agents.is_admin, agents.totp_enabled, departments.name AS department_name,
               (SELECT COUNT(*) FROM tickets WHERE assigned_to = agents.id AND status IN ('Open', 'In Progress')) AS open_count
        FROM agents
        LEFT JOIN departments ON departments.id = agents.department_id
@@ -2268,6 +2413,30 @@ router.post("/agents/:id/deactivate", verifyCsrf, (req, res) => {
 
 router.post("/agents/:id/activate", verifyCsrf, (req, res) => {
   db.prepare("UPDATE agents SET active = 1 WHERE id = ?").run(req.params.id);
+  res.redirect("/dashboard/agents");
+});
+
+// The lost-device case: an agent with 2FA on who can no longer generate
+// codes has no self-service way back in (that's the whole point of the
+// second factor), so an admin can clear it for them here - same
+// "admin is the one deliberate escalation path" reasoning as everywhere
+// else is_admin bypasses a normal rule (see src/departments.js). Logged to
+// agent_activity (shown on /dashboard/settings/login-log) so it's clear
+// after the fact who reset whose 2FA and when - the same audit reasoning as
+// ticket_activity/asset_activity, just for agent accounts instead of
+// tickets/assets.
+router.post("/agents/:id/reset-2fa", verifyCsrf, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const target = db.prepare("SELECT id, name, totp_enabled FROM agents WHERE id = ?").get(id);
+  if (!target) return res.redirect("/dashboard/agents");
+
+  if (target.totp_enabled) {
+    db.prepare("UPDATE agents SET totp_secret = NULL, totp_enabled = 0 WHERE id = ?").run(id);
+    db.prepare(
+      `INSERT INTO agent_activity (target_agent_id, actor_agent_id, body) VALUES (?, ?, ?)`
+    ).run(id, req.session.agentId, `${res.locals.currentAgent.name} reset two-factor authentication for ${target.name}.`);
+  }
+
   res.redirect("/dashboard/agents");
 });
 

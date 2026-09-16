@@ -27,14 +27,15 @@ function requireAdmin(req, res, next) {
 // next login attempt. Includes department_id/is_admin/department_name -
 // department scoping (src/departments.js) reads currentAgent directly
 // rather than re-querying the agent on every route, so this is the one
-// place that has to keep them current.
+// place that has to keep them current. totp_enabled is here too so the
+// header/settings views can show current 2FA status without a second query.
 function attachAgent(db) {
   return (req, res, next) => {
     if (req.session && req.session.agentId) {
       const agent = db
         .prepare(
           `SELECT agents.id, agents.name, agents.email, agents.department_id, agents.is_admin,
-                  departments.name AS department_name
+                  agents.totp_enabled, departments.name AS department_name
            FROM agents
            LEFT JOIN departments ON departments.id = agents.department_id
            WHERE agents.id = ? AND agents.active = 1`
