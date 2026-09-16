@@ -23,7 +23,8 @@ before(async () => {
   client = makeClient(app.baseUrl);
   db = new DatabaseSync(app.dbPath);
 
-  db.prepare("INSERT INTO agents (name, email, password_hash) VALUES (?, ?, ?)").run(
+  // is_admin: this test visits the Agents page, which is admin-only.
+  db.prepare("INSERT INTO agents (name, email, password_hash, is_admin) VALUES (?, ?, ?, 1)").run(
     "Directory Agent",
     "directory-agent@example.com",
     bcrypt.hashSync("correct-password", 4)

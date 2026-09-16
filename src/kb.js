@@ -43,7 +43,30 @@ function publishedList({ category = "", q = "" } = {}) {
 }
 
 function allForDashboard() {
-  return db.prepare("SELECT * FROM kb_articles ORDER BY published DESC, title").all();
+  return db
+    .prepare(
+      `SELECT kb_articles.*, departments.name AS department_display_name
+       FROM kb_articles LEFT JOIN departments ON departments.id = kb_articles.department_id
+       ORDER BY published DESC, title`
+    )
+    .all();
+}
+
+// The dashboard KB list, scoped to what `agent` can manage: every shared
+// article (department_id IS NULL), plus their own department's, plus
+// everything for an admin. The public /kb browsing list (publishedList()
+// above) stays unscoped on purpose - department-specific public-facing
+// content is explicitly out of scope for this feature.
+function forAgent(agent) {
+  if (agent && agent.is_admin) return allForDashboard();
+  return db
+    .prepare(
+      `SELECT kb_articles.*, departments.name AS department_display_name
+       FROM kb_articles LEFT JOIN departments ON departments.id = kb_articles.department_id
+       WHERE kb_articles.department_id IS NULL OR kb_articles.department_id = ?
+       ORDER BY published DESC, title`
+    )
+    .all(agent && agent.department_id);
 }
 
 function getBySlug(slug) {
@@ -58,13 +81,14 @@ function create(fields, agentId) {
   const title = (fields.title || "").trim().slice(0, 200);
   const body = (fields.body || "").trim().slice(0, 20000);
   const category = (fields.category || "").trim().slice(0, 100) || null;
+  const departmentId = fields.department_id ? parseInt(fields.department_id, 10) : null;
   if (!title) return { error: "Title is required." };
   if (!body) return { error: "Body is required." };
 
   const slug = uniqueSlug(title);
   const result = db
-    .prepare("INSERT INTO kb_articles (title, slug, body, category, agent_id) VALUES (?, ?, ?, ?, ?)")
-    .run(title, slug, body, category, agentId);
+    .prepare("INSERT INTO kb_articles (title, slug, body, category, agent_id, department_id) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(title, slug, body, category, agentId, departmentId);
   return { id: result.lastInsertRowid };
 }
 
@@ -72,6 +96,7 @@ function update(id, fields) {
   const title = (fields.title || "").trim().slice(0, 200);
   const body = (fields.body || "").trim().slice(0, 20000);
   const category = (fields.category || "").trim().slice(0, 100) || null;
+  const departmentId = fields.department_id ? parseInt(fields.department_id, 10) : null;
   const published = fields.published ? 1 : 0;
   if (!title) return { error: "Title is required." };
   if (!body) return { error: "Body is required." };
@@ -82,9 +107,9 @@ function update(id, fields) {
   // edits (retitling shouldn't break a link someone already shared) unless
   // there's never been a title at all, which can't actually happen here.
   db.prepare(
-    "UPDATE kb_articles SET title = ?, body = ?, category = ?, published = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(title, body, category, published, id);
+    "UPDATE kb_articles SET title = ?, body = ?, category = ?, department_id = ?, published = ?, updated_at = datetime('now') WHERE id = ?"
+  ).run(title, body, category, departmentId, published, id);
   return { id };
 }
 
-module.exports = { publishedList, allForDashboard, getBySlug, get, create, update, uniqueSlug };
+module.exports = { publishedList, allForDashboard, forAgent, getBySlug, get, create, update, uniqueSlug };

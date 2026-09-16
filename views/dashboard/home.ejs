@@ -298,6 +298,26 @@
       <% } %>
     </div>
 
+    <div class="card bento-category">
+      <h2>By department</h2>
+      <% if (!byDepartment.length) { %>
+        <div class="chart-empty">
+          <span class="icon icon-inbox"></span>
+          <p>No tickets yet.</p>
+        </div>
+      <% } else { %>
+        <div class="hbar-chart">
+          <% byDepartment.forEach(function(r) { %>
+            <div class="hbar-row">
+              <span class="hbar-label"><%= r.label %></span>
+              <span class="hbar-track"><span class="hbar-fill <%= r.barClass %>"></span></span>
+              <span class="hbar-value"><%= r.count %></span>
+            </div>
+          <% }) %>
+        </div>
+      <% } %>
+    </div>
+
     <div class="card bento-status">
       <h2>By status</h2>
       <% if (!byStatus.length) { %>

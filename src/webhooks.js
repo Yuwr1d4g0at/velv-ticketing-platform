@@ -18,11 +18,18 @@ function sign(secret, body) {
   return crypto.createHmac("sha256", secret).update(body).digest("hex");
 }
 
-function triggerWebhooks(eventType, payload) {
+// departmentId identifies which department the triggering ticket belongs to
+// (its category's department) - a webhook with a department_id only fires
+// for that department's tickets; one with department_id NULL (the default,
+// and every webhook that existed before this feature) still fires
+// platform-wide, unchanged. Passing no departmentId (e.g. an event with no
+// natural single department) never filters anything out.
+function triggerWebhooks(eventType, payload, departmentId = null) {
   const subscribed = db
     .prepare("SELECT * FROM webhooks WHERE active = 1")
     .all()
-    .filter((w) => w.events.split(",").includes(eventType));
+    .filter((w) => w.events.split(",").includes(eventType))
+    .filter((w) => w.department_id == null || departmentId == null || w.department_id === departmentId);
   if (!subscribed.length) return;
 
   const body = JSON.stringify({ event: eventType, sent_at: new Date().toISOString(), data: payload });

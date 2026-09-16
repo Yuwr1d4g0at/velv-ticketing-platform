@@ -1,0 +1,94 @@
+<%- include('../partials/header') %>
+<h1>Departments &amp; categories</h1>
+<p class="muted">Every agent belongs to exactly one department; every ticket category belongs to exactly one department. Together they're what scopes a regular agent to only their own department's tickets, KB articles, canned responses, and reports - see the Agents page for the one bypass (admin). Neither is ever hard-deleted - deactivate one instead if it's no longer in use.</p>
+
+<% if (error) { %>
+  <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+<% } %>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">Department</th>
+        <th scope="col">Status</th>
+        <th scope="col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% departmentsList.forEach(function(d) { %>
+        <tr class="<%= d.active ? '' : 'row-inactive' %>">
+          <td><%= d.name %></td>
+          <td><span class="badge <%= d.active ? 'badge-status-open' : '' %>"><%= d.active ? 'Active' : 'Deactivated' %></span></td>
+          <td>
+            <form action="/dashboard/settings/departments/<%= d.id %>/toggle" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button"><%= d.active ? 'Deactivate' : 'Reactivate' %></button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card card-narrow">
+  <h2>Add a department</h2>
+  <form action="/dashboard/settings/departments" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label for="dept-name">Name</label>
+    <input type="text" id="dept-name" name="name" required maxlength="100" placeholder="e.g. Legal">
+    <button type="submit" class="button-primary">Add department</button>
+  </form>
+</div>
+
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">Category</th>
+        <th scope="col">Department</th>
+        <th scope="col">Status</th>
+        <th scope="col"></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!categoriesList.length) { %>
+        <tr><td colspan="4" class="empty-row">No categories yet.</td></tr>
+      <% } %>
+      <% categoriesList.forEach(function(c) { %>
+        <tr class="<%= c.active ? '' : 'row-inactive' %>">
+          <td><%= c.name %></td>
+          <td><%= c.department_name %></td>
+          <td><span class="badge <%= c.active ? 'badge-status-open' : '' %>"><%= c.active ? 'Active' : 'Deactivated' %></span></td>
+          <td>
+            <form action="/dashboard/settings/departments/categories/<%= c.id %>/toggle" method="POST" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="link-button"><%= c.active ? 'Deactivate' : 'Reactivate' %></button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
+
+<div class="card card-medium">
+  <h2>Add a category</h2>
+  <form action="/dashboard/settings/departments/categories" method="POST" class="stacked-form">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label for="cat-name">Name</label>
+    <input type="text" id="cat-name" name="name" required maxlength="100" placeholder="e.g. Legal - Contract Review">
+
+    <label for="cat-department">Department</label>
+    <select id="cat-department" name="department_id" required>
+      <option value="" disabled selected>Choose one&hellip;</option>
+      <% departmentsList.filter(function(d) { return d.active; }).forEach(function(d) { %>
+        <option value="<%= d.id %>"><%= d.name %></option>
+      <% }) %>
+    </select>
+
+    <button type="submit" class="button-primary">Add category</button>
+  </form>
+</div>
+<%- include('../partials/footer') %>

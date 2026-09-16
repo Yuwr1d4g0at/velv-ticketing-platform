@@ -22,6 +22,8 @@
     </div>
   </div>
   <div class="badge-group">
+    <% if (departmentName) { %><span class="badge"><%= departmentName %></span><% } %>
+    <% if (ticket.confidential) { %><span class="badge badge-aging">Confidential</span><% } %>
     <% if (aging) { %><span class="badge badge-aging">Aging</span><% } %>
     <span class="badge badge-priority-<%= ticket.priority.toLowerCase() %>"><%= ticket.priority %></span>
     <span class="badge badge-status-<%= ticket.status.replace(/\s+/g, '-').toLowerCase() %>"><%= ticket.status %></span>
@@ -217,6 +219,15 @@
           </select>
           <button type="submit" class="button-secondary">Save</button>
         </form>
+
+        <form action="/dashboard/tickets/<%= ticket.id %>/confidential" method="POST" class="property-row">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <label class="checkbox-label">
+            <input type="checkbox" name="confidential" value="1" <%= ticket.confidential ? 'checked' : '' %> data-autosubmit>
+            Confidential
+          </label>
+        </form>
+        <p class="field-hint">Hides this ticket from every same-department agent except its assignee and admins. Department scoping still applies underneath this - it never widens who can see the ticket, only narrows it further.</p>
       </div>
     </div>
 
