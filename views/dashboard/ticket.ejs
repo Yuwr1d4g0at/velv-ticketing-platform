@@ -424,5 +424,8 @@
 <p>
   <a href="/dashboard">&larr; Back to all tickets</a>
   &middot; <a href="/dashboard/tickets/<%= ticket.id %>/print" target="_blank" rel="noopener">Print / Save as PDF</a>
+  <% if (currentAgent.is_admin) { %>
+    &middot; <a href="/dashboard/tickets/<%= ticket.id %>/view-as-requester" target="_blank" rel="noopener">View as requester (preview)</a>
+  <% } %>
 </p>
 <%- include('../partials/footer') %>

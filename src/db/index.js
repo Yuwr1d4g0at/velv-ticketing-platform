@@ -836,4 +836,41 @@ if (activityTable3 && !activityTable3.sql.includes("approval_change")) {
   db.exec("PRAGMA foreign_keys = ON");
 }
 
+// Twenty-third/twenty-fourth migrations: guarded ALTER TABLE for agents.totp_secret
+// and agents.totp_enabled - optional TOTP two-factor login (see src/totp.js).
+// totp_secret is nullable (no secret until an agent opts in) and deliberately
+// NOT written until setup is actually verified with a real code (see
+// /dashboard/settings/security in src/routes/dashboard.js) - a secret an
+// agent never confirmed they can generate codes for would just lock them out
+// the moment totp_enabled flipped on. Both are plain columns (no REFERENCES
+// clause), so - unlike the department_id/is_admin migration above - a
+// straightforward ALTER TABLE ADD COLUMN is enough here.
+const agentColumns4 = db.prepare("PRAGMA table_info(agents)").all();
+if (!agentColumns4.some((c) => c.name === "totp_secret")) {
+  db.exec("ALTER TABLE agents ADD COLUMN totp_secret TEXT");
+}
+const agentColumns5 = db.prepare("PRAGMA table_info(agents)").all();
+if (!agentColumns5.some((c) => c.name === "totp_enabled")) {
+  db.exec("ALTER TABLE agents ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0");
+}
+
+// Audit trail for admin actions taken on another agent's account - today
+// that's just "reset this agent's 2FA" (the lost-device case, see the
+// /agents/:id/reset-2fa route), but the table's shaped to cover more of the
+// same later. Same idea as ticket_activity/asset_activity above: a small,
+// readable log of who did what to whom, rather than nothing at all.
+// target_agent_id/actor_agent_id both ON DELETE SET NULL, same reasoning as
+// every other agent reference in this schema - the log entry outlives
+// either account.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS agent_activity (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_agent_id INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+    actor_agent_id  INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+    body            TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_activity_target_agent_id ON agent_activity(target_agent_id);
+`);
+
 module.exports = db;

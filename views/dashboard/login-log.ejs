@@ -35,4 +35,30 @@
     </tbody>
   </table>
 </div>
+
+<h2>Admin actions on agent accounts</h2>
+<p class="muted">The most recent 200 admin actions taken on another agent's account - e.g. resetting a lost-device 2FA.</p>
+<div class="table-wrap">
+  <table class="ticket-table">
+    <thead>
+      <tr>
+        <th scope="col">When</th>
+        <th scope="col">Action</th>
+        <th scope="col">By</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if (!agentActivity.length) { %>
+        <tr><td colspan="3" class="empty-row">No admin actions recorded yet.</td></tr>
+      <% } %>
+      <% agentActivity.forEach(function(a) { %>
+        <tr>
+          <td><%= a.created_at %></td>
+          <td><%= a.body %></td>
+          <td><%= a.actor_name || 'Unknown' %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</div>
 <%- include('../partials/footer') %>

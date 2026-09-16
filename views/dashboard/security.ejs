@@ -1,0 +1,51 @@
+<%- include('../partials/header') %>
+<h1>Two-factor authentication</h1>
+<p class="muted">Adds a 6-digit code from an authenticator app as a second step after your password when logging in. Optional, and only for your own account - if you lose your device, an admin can reset it for you from the Agents page.</p>
+
+<% if (notice) { %>
+  <div class="alert alert-info" role="status"><span class="icon icon-alert-triangle"></span><%= notice %></div>
+<% } %>
+<% if (error) { %>
+  <div class="alert alert-error" role="alert"><span class="icon icon-alert-triangle"></span><%= error %></div>
+<% } %>
+
+<div class="card card-medium">
+  <% if (totpEnabled) { %>
+    <p><span class="badge badge-status-resolved">Enabled</span></p>
+    <h2>Turn off two-factor authentication</h2>
+    <p class="muted">Confirm your password to turn it off.</p>
+    <form action="/dashboard/settings/security/2fa/disable" method="POST" class="stacked-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <label for="disable_password">Current password</label>
+      <input type="password" id="disable_password" name="password" required>
+      <button type="submit" class="button-secondary">Turn off 2FA</button>
+    </form>
+  <% } else if (pendingSecret) { %>
+    <p><span class="badge">Setup in progress</span></p>
+    <h2>Set up two-factor authentication</h2>
+    <p class="muted">Add this account to your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, etc.) using manual entry, then enter the 6-digit code it shows to confirm.</p>
+    <dl class="def-list">
+      <dt>Secret</dt>
+      <dd><code><%= pendingSecret %></code></dd>
+      <dt>Setup URI</dt>
+      <dd class="overflow-wrap-anywhere"><code><%= otpauthUri %></code></dd>
+    </dl>
+    <form action="/dashboard/settings/security/2fa/verify" method="POST" class="stacked-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <label for="code">6-digit code</label>
+      <input type="text" id="code" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" required autofocus>
+      <button type="submit" class="button-primary">Verify and turn on</button>
+    </form>
+    <form action="/dashboard/settings/security/2fa/cancel" method="POST" class="inline-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button type="submit" class="link-button">Cancel setup</button>
+    </form>
+  <% } else { %>
+    <p><span class="badge">Not enabled</span></p>
+    <form action="/dashboard/settings/security/2fa/setup" method="POST" class="inline-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button type="submit" class="button-primary">Set up two-factor authentication</button>
+    </form>
+  <% } %>
+</div>
+<%- include('../partials/footer') %>

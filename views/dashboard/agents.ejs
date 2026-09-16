@@ -12,6 +12,7 @@
         <th scope="col">Open tickets assigned</th>
         <th scope="col">Added</th>
         <th scope="col">Status</th>
+        <th scope="col">2FA</th>
         <th scope="col"></th>
       </tr>
     </thead>
@@ -54,6 +55,17 @@
           <td><%= a.open_count %></td>
           <td><%= a.created_at %></td>
           <td><span class="badge <%= a.active ? 'badge-status-open' : '' %>"><%= a.active ? 'Active' : 'Deactivated' %></span></td>
+          <td>
+            <% if (a.totp_enabled) { %>
+              <span class="badge badge-status-resolved">On</span>
+              <form action="/dashboard/agents/<%= a.id %>/reset-2fa" method="POST" class="inline-form" data-confirm="Reset two-factor authentication for <%= a.name %>? They'll be able to log in with just their password until they set it up again.">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button type="submit" class="link-button">Reset (lost device)</button>
+              </form>
+            <% } else { %>
+              <span class="badge">Off</span>
+            <% } %>
+          </td>
           <td>
             <% if (a.active) { %>
               <form action="/dashboard/agents/<%= a.id %>/deactivate" method="POST" class="inline-form">
