@@ -113,6 +113,24 @@ function setCategoryActive(id, active) {
   db.prepare("UPDATE categories SET active = ? WHERE id = ?").run(active ? 1 : 0, id);
 }
 
+// ---- Approval gate ---------------------------------------------------------
+
+// Whether closing a ticket filed under `categoryName` has to go through the
+// approval gate (see applyStatusChange in src/routes/dashboard.js) instead of
+// closing directly. Off by default for every category - see the
+// requires_approval migration in src/db/index.js, which flips it on for
+// Marketing's Content & Design and Campaign Request out of the box, and
+// leaves every other category (including everything that predates this
+// feature) closing exactly as it always has.
+function categoryRequiresApproval(categoryName) {
+  const row = db.prepare("SELECT requires_approval FROM categories WHERE name = ?").get(categoryName);
+  return Boolean(row && row.requires_approval);
+}
+
+function setCategoryRequiresApproval(id, requiresApproval) {
+  db.prepare("UPDATE categories SET requires_approval = ? WHERE id = ?").run(requiresApproval ? 1 : 0, id);
+}
+
 // ---- Ticket visibility ----------------------------------------------------
 
 // Whether `agent` can see `ticket`. `agent` needs at least
@@ -168,6 +186,8 @@ module.exports = {
   departmentIdForCategory,
   createCategory,
   setCategoryActive,
+  categoryRequiresApproval,
+  setCategoryRequiresApproval,
   canSeeTicket,
   ticketVisibilitySql,
   isEligibleAssignee,

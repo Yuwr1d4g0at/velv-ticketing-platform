@@ -767,4 +767,73 @@ if (!webhookColumns.some((c) => c.name === "department_id")) {
   db.exec("ALTER TABLE webhooks ADD COLUMN department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL");
 }
 
+// Twentieth migration: guarded ALTER TABLE for categories.requires_approval -
+// see src/departments.js's approval-gate helpers and the /tickets/:id/status
+// route in src/routes/dashboard.js. Defaults every existing category to 0
+// (no change in behavior - closing still works exactly as it did before this
+// feature existed) except for a one-time backfill, right below, of the two
+// Marketing categories this is being built for.
+const categoryColumns = db.prepare("PRAGMA table_info(categories)").all();
+if (!categoryColumns.some((c) => c.name === "requires_approval")) {
+  db.exec("ALTER TABLE categories ADD COLUMN requires_approval INTEGER NOT NULL DEFAULT 0");
+  // Content & Design and Campaign Request are the two Marketing categories a
+  // content-review pipeline actually needs a sign-off gate on - flipped on
+  // by default so this ships configured, not just capable. Tied to the
+  // ALTER above running (guarded the same way, so this only ever fires
+  // once): after this, it's a normal per-category setting anyone can toggle
+  // from /dashboard/settings/departments, on any department's category.
+  db.exec(
+    `UPDATE categories SET requires_approval = 1 WHERE name IN ('Content & Design', 'Campaign Request')`
+  );
+}
+
+// Twenty-first migration: guarded ALTER TABLE for tickets.approval_status and
+// tickets.approval_note - the per-ticket half of the approval gate above.
+// approval_status is NULL for the overwhelming majority of tickets (any
+// category that doesn't require approval, plus one that does but has never
+// been through a close attempt); 'pending' while awaiting a decision,
+// 'approved' once closed off the back of one, 'rejected' when sent back.
+// approval_note is the optional reviewer note shown back to the assignee on
+// rejection (see the /tickets/:id/approval/reject route) - generic, not
+// Marketing-specific, even though Marketing's content-review flow is the
+// reason it exists. Neither has a CHECK constraint, same as the pre-existing
+// tickets.status/priority columns - validated in application code instead
+// (see APPROVAL_STATUSES in src/routes/dashboard.js) rather than at the DB
+// level.
+const ticketColumns11 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns11.some((c) => c.name === "approval_status")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN approval_status TEXT");
+}
+const ticketColumns12 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns12.some((c) => c.name === "approval_note")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN approval_note TEXT");
+}
+
+// Twenty-second migration: same rebuild-in-place shape as the
+// priority_change/requester_reply migrations above, this time to add the
+// 'approval_change' type - submitted-for-approval/approved/rejected are all
+// logged under it (see applyStatusChange and the /tickets/:id/approval/*
+// routes in src/routes/dashboard.js).
+const activityTable3 = db
+  .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ticket_activity'")
+  .get();
+if (activityTable3 && !activityTable3.sql.includes("approval_change")) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec(`
+    ALTER TABLE ticket_activity RENAME TO ticket_activity_pre_approval;
+    CREATE TABLE ticket_activity (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id  INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+      agent_id   INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+      type       TEXT NOT NULL DEFAULT 'note' CHECK (type IN ('note', 'status_change', 'assignment', 'priority_change', 'reply', 'requester_reply', 'approval_change')),
+      body       TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT INTO ticket_activity SELECT * FROM ticket_activity_pre_approval;
+    DROP TABLE ticket_activity_pre_approval;
+    CREATE INDEX IF NOT EXISTS idx_activity_ticket_id ON ticket_activity(ticket_id);
+  `);
+  db.exec("PRAGMA foreign_keys = ON");
+}
+
 module.exports = db;

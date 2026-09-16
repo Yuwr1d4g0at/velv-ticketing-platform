@@ -847,6 +847,9 @@ form.split-layout.stacked-form { display: grid; max-width: none; }
 .badge-asset-status-retired { background: var(--velv-ink-100); color: var(--velv-ink-700); }
 .badge-asset-status-lost { background: #FDE3E7; color: #B0233F; }
 .badge-aging { background: #FDF0D8; color: #8A5A00; margin-left: var(--space-2); }
+.badge-approval-pending { background: #FDF0D8; color: #8A5A00; }
+.badge-approval-rejected { background: #FDE3E7; color: #B0233F; }
+.badge-approval-approved { background: #D6F6E7; color: #067A45; }
 
 /* Assets page: a card grid instead of a table (see views/dashboard/assets.ejs)
    - each card is itself the link to the asset's detail page, so the whole
