@@ -38,8 +38,12 @@
       <label for="category"><%= t('category') %></label>
       <select id="category" name="category" required>
         <option value="" disabled <%= !values.category ? 'selected' : '' %>><%= t('choose_one') %></option>
-        <% categories.forEach(function(c) { %>
-          <option value="<%= c %>" <%= values.category === c ? 'selected' : '' %>><%= categoryLabel(c) %></option>
+        <% Object.keys(categories).forEach(function(deptName) { %>
+          <optgroup label="<%= deptName %>">
+            <% categories[deptName].forEach(function(c) { %>
+              <option value="<%= c.name %>" <%= values.category === c.name ? 'selected' : '' %>><%= categoryLabel(c.name) %></option>
+            <% }) %>
+          </optgroup>
         <% }) %>
       </select>
 

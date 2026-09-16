@@ -651,6 +651,10 @@ router.get("/tickets/:id", async (req, res) => {
     allTags: allTags(),
     cannedResponses: canned.forAgent(res.locals.currentAgent),
     departmentName: departments.get(departments.departmentIdForCategory(ticket.category))?.name || null,
+    // Only actually rendered for an admin (see the "Transfer to another
+    // department" card in views/dashboard/ticket.ejs), but cheap enough to
+    // just always compute here rather than branch on is_admin twice.
+    categoriesByDepartment: departments.categoriesByDepartment(),
     rating,
     otherTickets,
     linkedTickets,
@@ -1061,6 +1065,67 @@ router.post("/tickets/:id/confidential", verifyCsrf, (req, res) => {
         ? "Marked confidential - only the assigned agent and admins can see this ticket."
         : "Removed the confidential flag."
     );
+  }
+
+  res.redirect(`/dashboard/tickets/${ticket.id}`);
+});
+
+// Moves a misfiled ticket across the strict department boundary by changing
+// its category - department is always derived from category
+// (departments.departmentIdForCategory), never a stored field on the ticket
+// itself, so updating category IS what moves it. This is the only
+// sanctioned way to reach across departments in this app (cross-department
+// merge is deliberately rejected - see /tickets/:id/merge above), so it's
+// kept admin-only rather than opened up to any agent who can currently see
+// the ticket. Immediately removes the ticket from the sending department's
+// queue and puts it in the target's, per departments.canSeeTicket's strict
+// department match - that's the intended effect of a transfer, not a bug.
+router.post("/tickets/:id/transfer", requireAdmin, verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(req, res, req.params.id);
+  if (!ticket) return;
+
+  const category = (req.body.category || "").trim();
+  if (!departments.isValidCategoryName(category)) {
+    return res.status(400).render("error", { title: "Invalid category", message: "Choose a valid category to transfer into." });
+  }
+  if (category === ticket.category) {
+    // Picked the ticket's own current category - nothing to do.
+    return res.redirect(`/dashboard/tickets/${ticket.id}`);
+  }
+
+  const fromDept = departments.get(departments.departmentIdForCategory(ticket.category));
+  const toDept = departments.get(departments.departmentIdForCategory(category));
+  const actingAgent = db.prepare("SELECT name FROM agents WHERE id = ?").get(req.session.agentId);
+
+  // The current assignee (if any) may not belong to the target department -
+  // same "only agents in that category's department are eligible" rule
+  // applied everywhere else an assignment happens (departments.
+  // isEligibleAssignee). Rather than leave a stale cross-department
+  // assignment in place, unassign it here - otherwise a confidential
+  // ticket transferred this way could end up visible to nobody in the
+  // receiving department at all (confidential narrows visibility to the
+  // assignee, who'd now be outside it - see departments.canSeeTicket).
+  let unassigned = false;
+  if (ticket.assigned_to) {
+    const assignee = db.prepare("SELECT id, department_id, is_admin FROM agents WHERE id = ?").get(ticket.assigned_to);
+    if (!departments.isEligibleAssignee(assignee, category)) unassigned = true;
+  }
+
+  db.exec("BEGIN");
+  try {
+    db.prepare(
+      `UPDATE tickets SET category = ?${unassigned ? ", assigned_to = NULL" : ""}, updated_at = datetime('now') WHERE id = ?`
+    ).run(category, ticket.id);
+    db.prepare(`INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'note', ?)`).run(
+      ticket.id,
+      req.session.agentId,
+      `Transferred from ${fromDept ? fromDept.name : "an unknown department"} to ${toDept ? toDept.name : "an unknown department"} by ${actingAgent.name}.` +
+        (unassigned ? " Unassigned, since the previous assignee is not in the new department." : "")
+    );
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
   }
 
   res.redirect(`/dashboard/tickets/${ticket.id}`);
@@ -1684,6 +1749,41 @@ function buildReportsData(reportRange, unit, agent) {
     )
     .all(...vis.params);
 
+  // Department capacity: open (Open/In Progress) ticket count vs active,
+  // non-admin agent count, per department, right now - same "live snapshot,
+  // ignores the selected report range" treatment as Current workload above.
+  // A non-admin only ever gets their OWN department's row here (the WHERE
+  // below), which is fine under strict department-only visibility: it's
+  // just a count of that agent's own department's tickets/agents, nothing
+  // about another department is exposed. An admin gets every active
+  // department, for the cross-department comparison. Deliberately its own
+  // WHERE rather than reusing ticketVisibilitySql() (which filters a
+  // `tickets` query row-by-row) - this rolls up per department instead, so
+  // it filters on departments.id directly.
+  const departmentCapacityWhere =
+    agent && agent.is_admin ? " WHERE departments.active = 1" : " WHERE departments.active = 1 AND departments.id = ?";
+  const departmentCapacityParams = agent && agent.is_admin ? [] : [agent && agent.department_id];
+  const departmentCapacityRaw = db
+    .prepare(
+      `SELECT departments.name AS label,
+              (SELECT COUNT(*) FROM tickets
+               JOIN categories ON categories.name = tickets.category
+               WHERE categories.department_id = departments.id AND tickets.status IN ('Open', 'In Progress')) AS open_count,
+              (SELECT COUNT(*) FROM agents
+               WHERE agents.department_id = departments.id AND agents.active = 1 AND agents.is_admin = 0) AS agent_count
+       FROM departments
+       ${departmentCapacityWhere}
+       ORDER BY departments.name`
+    )
+    .all(...departmentCapacityParams);
+  const capacityOpenMax = Math.max(1, ...departmentCapacityRaw.map((r) => r.open_count));
+  const departmentCapacity = departmentCapacityRaw.map((r) => ({
+    label: r.label,
+    openCount: r.open_count,
+    agentCount: r.agent_count,
+    barClass: barClass("bar-w", r.open_count, capacityOpenMax),
+  }));
+
   const volumeMax = Math.max(1, ...volume.map((v) => v.count));
   const withBarClass = (rows, prefix) => {
     const max = Math.max(1, ...rows.map((r) => r.count));
@@ -1826,6 +1926,7 @@ function buildReportsData(reportRange, unit, agent) {
     byStatus: withBarClass(byStatus, "bar-w"),
     byAgent: withBarClass(byAgent, "bar-w"),
     byDepartment: withBarClass(byDepartment, "bar-w"),
+    departmentCapacity,
     csatTrend,
     slaCompliance,
     agentPerformance,

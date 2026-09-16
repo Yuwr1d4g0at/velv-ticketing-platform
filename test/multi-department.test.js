@@ -21,7 +21,7 @@ const { startTestApp, makeClient, extractCsrf } = require("./helpers");
 // would exhaust the limiter partway through this file and make later tests
 // fail with an unrelated "redirected to /login" rather than the thing
 // they're actually testing.
-let app, client, itClient, hrClient, adminClient, secondItClient, switcherClient;
+let app, client, itClient, hrClient, adminClient, secondItClient, switcherClient, legalClient;
 
 async function loginAs(c, email) {
   const loginPage = await c.get("/login");
@@ -70,6 +70,16 @@ before(async () => {
     "switcher-agent@example.com",
     passwordHash
   );
+  // A Legal-department agent (department id 3 - Legal is seeded third, see
+  // DEFAULT_DEPARTMENTS in src/db/index.js) - used by the department
+  // transfer and department-capacity tests below, both of which want a
+  // department untouched by every other test in this file so its
+  // tickets/agents start from a known, deterministic zero.
+  db.prepare("INSERT INTO agents (name, email, password_hash, department_id) VALUES (?, ?, ?, 3)").run(
+    "Legal Agent",
+    "legal-agent@example.com",
+    passwordHash
+  );
   db.close();
 
   itClient = makeClient(app.baseUrl);
@@ -77,11 +87,13 @@ before(async () => {
   adminClient = makeClient(app.baseUrl);
   secondItClient = makeClient(app.baseUrl);
   switcherClient = makeClient(app.baseUrl);
+  legalClient = makeClient(app.baseUrl);
   await loginAs(itClient, "it-agent@example.com");
   await loginAs(hrClient, "hr-agent@example.com");
   await loginAs(adminClient, "admin-agent@example.com");
   await loginAs(secondItClient, "second-it-agent@example.com");
   await loginAs(switcherClient, "switcher-agent@example.com");
+  await loginAs(legalClient, "legal-agent@example.com");
 });
 
 after(() => app.close());
@@ -492,4 +504,142 @@ test("a non-admin agent can't view or manage the Agents page, including granting
   const row = d.prepare("SELECT is_admin FROM agents WHERE id = ?").get(targetId);
   d.close();
   assert.equal(row.is_admin, 0, "the target agent must not have been granted admin");
+});
+
+// ---- Department transfer -------------------------------------------------
+// The only sanctioned way to move a ticket across the strict department
+// boundary: an admin changes its category, which is what actually moves it
+// (department is always derived from category, never a stored field on the
+// ticket - see departments.departmentIdForCategory). Transferring into
+// Legal specifically (rather than reusing IT/HR) so this exercises a
+// department none of the tests above have touched yet.
+test("Transfer to department: admin can move a ticket, which logs activity and immediately flips visibility to the target department", async () => {
+  const itTicketId = createTicketDirect({ subject: "Misfiled with IT, actually a Legal matter", category: "Hardware" });
+
+  // Visible to the sending department before the transfer...
+  const beforeIt = await itClient.get(`/dashboard/tickets/${itTicketId}`);
+  assert.equal(beforeIt.status, 200, "the IT agent should see the ticket before it's transferred away");
+  // ...and not yet visible to the target department.
+  const beforeLegal = await legalClient.get(`/dashboard/tickets/${itTicketId}`);
+  assert.equal(beforeLegal.status, 404, "the Legal agent should not see an IT ticket before it's transferred to Legal");
+
+  const page = await adminClient.get(`/dashboard/tickets/${itTicketId}`);
+  const csrf = extractCsrf(await page.text());
+
+  const res = await adminClient.postForm(`/dashboard/tickets/${itTicketId}/transfer`, {
+    category: "Contract Review", // Legal
+    _csrf: csrf,
+  });
+  assert.equal(res.status, 302);
+
+  const d = db();
+  const row = d.prepare("SELECT category FROM tickets WHERE id = ?").get(itTicketId);
+  const activity = d.prepare("SELECT body FROM ticket_activity WHERE ticket_id = ? ORDER BY id DESC LIMIT 1").get(itTicketId);
+  d.close();
+  assert.equal(row.category, "Contract Review", "the ticket's category should now be the Legal category that was picked");
+  assert.match(activity.body, /Transferred from IT to Legal by Admin Agent\./, "the transfer should be logged as ticket activity naming both departments and who did it");
+
+  // Visibility flips immediately: the sending department's agent can no
+  // longer see it, and the target department's agent now can - the exact
+  // pair of assertions the task calls out, since this is the one place a
+  // quiet visibility carve-out could sneak back in.
+  const afterIt = await itClient.get(`/dashboard/tickets/${itTicketId}`);
+  assert.equal(afterIt.status, 404, "the sending department's agent must no longer see the transferred ticket");
+  const afterLegal = await legalClient.get(`/dashboard/tickets/${itTicketId}`);
+  assert.equal(afterLegal.status, 200, "the target department's agent must now see the transferred ticket");
+});
+
+test("Transfer to department unassigns a ticket whose current assignee isn't in the target department", async () => {
+  const itAgentId = agentId("it-agent@example.com");
+  const ticketId = createTicketDirect({ subject: "Assigned in IT, transferred to Legal", category: "Software", assignedTo: itAgentId });
+
+  const page = await adminClient.get(`/dashboard/tickets/${ticketId}`);
+  const csrf = extractCsrf(await page.text());
+  const res = await adminClient.postForm(`/dashboard/tickets/${ticketId}/transfer`, { category: "Compliance", _csrf: csrf });
+  assert.equal(res.status, 302);
+
+  const d = db();
+  const row = d.prepare("SELECT assigned_to FROM tickets WHERE id = ?").get(ticketId);
+  d.close();
+  assert.equal(row.assigned_to, null, "the IT agent is not in Legal, so the transfer should have unassigned the ticket rather than leave a stale cross-department assignment");
+});
+
+test("a non-admin agent can't transfer a ticket to another department", async () => {
+  const ticketId = createTicketDirect({ subject: "Non-admin transfer attempt", category: "Hardware" });
+
+  const page = await itClient.get(`/dashboard/tickets/${ticketId}`);
+  const csrf = extractCsrf(await page.text());
+
+  const res = await itClient.postForm(`/dashboard/tickets/${ticketId}/transfer`, { category: "Contract Review", _csrf: csrf });
+  assert.equal(res.status, 403);
+
+  const d = db();
+  const row = d.prepare("SELECT category FROM tickets WHERE id = ?").get(ticketId);
+  d.close();
+  assert.equal(row.category, "Hardware", "a non-admin's transfer attempt must not have changed the ticket's category");
+});
+
+test("transferring to the ticket's own current category is a harmless no-op", async () => {
+  const ticketId = createTicketDirect({ subject: "Transfer to same category", category: "Hardware" });
+
+  const page = await adminClient.get(`/dashboard/tickets/${ticketId}`);
+  const csrf = extractCsrf(await page.text());
+  const res = await adminClient.postForm(`/dashboard/tickets/${ticketId}/transfer`, { category: "Hardware", _csrf: csrf });
+  assert.equal(res.status, 302);
+
+  const d = db();
+  const row = d.prepare("SELECT category FROM tickets WHERE id = ?").get(ticketId);
+  const activityCount = d.prepare("SELECT COUNT(*) AS c FROM ticket_activity WHERE ticket_id = ?").get(ticketId).c;
+  d.close();
+  assert.equal(row.category, "Hardware");
+  assert.equal(activityCount, 0, "picking the ticket's own current category should not log a spurious transfer activity row");
+});
+
+// ---- Department capacity --------------------------------------------------
+// Marketing is untouched by every test above (unlike Legal, which the
+// transfer tests just moved tickets into), so its counts are exactly
+// whatever this test itself creates. Legal's own counts are computed from
+// the db rather than hardcoded, since earlier tests in this file have
+// already transferred a couple of tickets into it - an exact hardcoded
+// count would make this test fragile/order-dependent.
+test("department capacity: a regular agent sees only their own department's row, an admin sees every department", async () => {
+  createTicketDirect({ subject: "Legal capacity ticket 1", category: "Contract Review" });
+  createTicketDirect({ subject: "Legal capacity ticket 2", category: "NDA / Confidentiality" });
+  createTicketDirect({ subject: "Marketing capacity ticket (resolved, should not count)", category: "Campaign Request" });
+  const d0 = db();
+  d0.prepare("UPDATE tickets SET status = 'Resolved' WHERE subject = 'Marketing capacity ticket (resolved, should not count)'").run();
+  d0.close();
+  // One genuinely open Marketing ticket, and no Marketing agent at all -
+  // exercises the "0 agents" edge case in the same assertion pass.
+  createTicketDirect({ subject: "Marketing capacity ticket (open)", category: "Brand Assets" });
+
+  function capacityPattern(departmentId) {
+    const d = db();
+    const openCount = d
+      .prepare(
+        `SELECT COUNT(*) AS c FROM tickets
+         JOIN categories ON categories.name = tickets.category
+         WHERE categories.department_id = ? AND tickets.status IN ('Open', 'In Progress')`
+      )
+      .get(departmentId).c;
+    const agentCount = d
+      .prepare("SELECT COUNT(*) AS c FROM agents WHERE department_id = ? AND active = 1 AND is_admin = 0")
+      .get(departmentId).c;
+    d.close();
+    return new RegExp(`${openCount} open[^<]*&middot;[^<]*${agentCount} agent`);
+  }
+
+  const legalPattern = capacityPattern(3);
+  const marketingPattern = capacityPattern(4); // 1 open, 0 agents
+
+  const legalHtml = await (await legalClient.get("/dashboard")).text();
+  assert.match(legalHtml, /Department capacity/);
+  assert.match(legalHtml, /in your own department/, "a non-admin's capacity card should say it's scoped to their own department");
+  assert.match(legalHtml, legalPattern, "Legal's capacity card should show Legal's own open-ticket and active-agent counts");
+  assert.doesNotMatch(legalHtml, /Marketing/, "a non-admin must not see another department's row in the capacity card");
+
+  const adminHtml = await (await adminClient.get("/dashboard")).text();
+  assert.doesNotMatch(adminHtml, /in your own department/, "an admin's capacity card should not claim to be scoped to just one department");
+  assert.match(adminHtml, legalPattern, "admin view should still show Legal's own numbers");
+  assert.match(adminHtml, marketingPattern, "admin view should show Marketing's 1 open ticket against 0 active agents there");
 });
