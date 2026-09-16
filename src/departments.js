@@ -68,17 +68,19 @@ function allCategoriesIncludingInactive() {
 
 // Flat list of category names - the direct replacement for the old
 // CATEGORIES constant everywhere a plain "is this a valid category" check
-// or an unstructured <select> needs one. The public request form
-// deliberately still uses this unfiltered list (department-specific public
-// intake is explicitly out of scope for this feature) - only the
-// dashboard's own views group categories by department.
+// or an unstructured <select> needs one.
 function categoryNames() {
   return categoriesAll().map((c) => c.name);
 }
 
-// Same categories, grouped by department name - for dashboard views that
-// present categories scoped to one department at a time (custom fields,
-// automation, templates, recurring tickets).
+// Same categories, grouped by department name - for any view that presents
+// categories organized by department, whether that's a dashboard view
+// scoped to one department at a time (custom fields, automation, templates,
+// recurring tickets) or the public request form's <optgroup>-per-department
+// category picker (see src/routes/public.js). Purely a presentation
+// grouping - it doesn't change which category a requester can pick, or how
+// a ticket's department gets derived (still departmentIdForCategory() below,
+// off whichever category name actually gets submitted).
 function categoriesByDepartment() {
   const grouped = {};
   for (const c of categoriesAll()) {

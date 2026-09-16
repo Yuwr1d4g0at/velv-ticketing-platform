@@ -134,7 +134,7 @@ router.get("/", (req, res) => {
   }
   res.render("public/request-form", {
     title: t(req.lang, "submit_request_title"),
-    categories: departments.categoryNames(),
+    categories: departments.categoriesByDepartment(),
     assets: assets.assignable(),
     customFieldsByCategory: customFields.byCategory(),
     subcategorySuggestions: subcategorySuggestions(),
@@ -192,7 +192,7 @@ router.post("/", submitLimiter, handleUpload("attachments"), (req, res) => {
     deleteUploadedFiles(req.files);
     return res.status(400).render("public/request-form", {
       title: t(req.lang, "submit_request_title"),
-      categories: departments.categoryNames(),
+      categories: departments.categoriesByDepartment(),
       assets: assets.assignable(),
       customFieldsByCategory: customFields.byCategory(),
       subcategorySuggestions: subcategorySuggestions(),

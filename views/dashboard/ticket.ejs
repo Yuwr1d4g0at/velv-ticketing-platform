@@ -231,6 +231,32 @@
       </div>
     </div>
 
+    <% if (currentAgent && currentAgent.is_admin) { %>
+      <div class="card">
+        <h2>Transfer to another department</h2>
+        <p class="muted">Moves this ticket by changing its category - department is always derived from category, so this is what actually moves it. It leaves the sending department's queue and enters the target department's immediately.</p>
+        <form
+          action="/dashboard/tickets/<%= ticket.id %>/transfer"
+          method="POST"
+          class="property-row"
+          data-confirm="Transfer ticket #<%= ticket.id %> to this category? It will leave the current department's queue immediately and this can't be undone from here."
+        >
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <label for="transfer_category">New category</label>
+          <select id="transfer_category" name="category">
+            <% Object.keys(categoriesByDepartment).forEach(function(deptName) { %>
+              <optgroup label="<%= deptName %>">
+                <% categoriesByDepartment[deptName].forEach(function(c) { %>
+                  <option value="<%= c.name %>" <%= ticket.category === c.name ? 'selected' : '' %>><%= c.name %></option>
+                <% }) %>
+              </optgroup>
+            <% }) %>
+          </select>
+          <button type="submit" class="button-secondary">Transfer</button>
+        </form>
+      </div>
+    <% } %>
+
     <div class="card" id="time">
       <h2>Time tracked</h2>
       <p class="muted">Total: <strong><%= formatMinutes(totalTimeMinutes) %></strong></p>
