@@ -25,8 +25,22 @@
     <p><a href="/dashboard/templates">Set up a ticket template</a> to speed up common recurring requests.</p>
   <% } %>
 
+  <% if (spawnPreview && spawnPreview.length) { %>
+    <div class="alert alert-info" role="status">
+      <span class="icon icon-alert-triangle"></span>
+      Using this template will also create <%= spawnPreview.length %> other ticket<%= spawnPreview.length === 1 ? '' : 's' %>,
+      each in its own department and linked back to this one:
+      <ul>
+        <% spawnPreview.forEach(function(item) { %>
+          <li><%= item.spawn_category %>: "<%= item.label.split('{name}').join(values.requester_name || '[name]') %>"</li>
+        <% }) %>
+      </ul>
+    </div>
+  <% } %>
+
   <form action="/dashboard/tickets/new" method="POST" class="stacked-form split-layout" enctype="multipart/form-data">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <input type="hidden" name="template_id" value="<%= values.template_id || '' %>">
     <div class="split-layout-aside">
       <p class="split-legend">Requester</p>
 

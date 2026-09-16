@@ -228,6 +228,14 @@
           </label>
         </form>
         <p class="field-hint">Hides this ticket from every same-department agent except its assignee and admins. Department scoping still applies underneath this - it never widens who can see the ticket, only narrows it further.</p>
+
+        <form action="/dashboard/tickets/<%= ticket.id %>/reminder" method="POST" class="property-row">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <label for="reminder_date">Reminder date</label>
+          <input type="date" id="reminder_date" name="reminder_date" value="<%= ticket.reminder_date || '' %>">
+          <button type="submit" class="button-secondary">Save</button>
+        </form>
+        <p class="field-hint">Emails this ticket's department as the date approaches (most relevant for a contract/compliance deadline), and re-alerts if the date changes. Leave blank to disable.</p>
       </div>
     </div>
 

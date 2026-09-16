@@ -28,6 +28,7 @@ const { WARRANTY_ALERT_DAYS } = require("../warranty");
 const kb = require("../kb");
 const recurring = require("../recurring");
 const automation = require("../automation");
+const checklists = require("../checklists");
 const notifications = require("../notifications");
 const customFields = require("../custom-fields");
 const timeEntries = require("../time-entries");
@@ -438,9 +439,17 @@ router.get("/tickets/new", (req, res) => {
   // once and a GET link is simpler and more robust than keeping three
   // separate inputs in sync via JS.
   let values = {};
+  // Checklist items on this template that spawn their own ticket elsewhere
+  // (see src/checklists.js) - shown as an upfront "this will also create..."
+  // hint, and carried through as values.template_id so the POST below knows
+  // which template's checklist to apply once the ticket is actually created.
+  let spawnPreview = [];
   if (req.query.template) {
     const template = db.prepare("SELECT * FROM ticket_templates WHERE id = ?").get(req.query.template);
-    if (template) values = { category: template.category, subject: template.subject, description: template.description };
+    if (template) {
+      values = { category: template.category, subject: template.subject, description: template.description, template_id: template.id };
+      spawnPreview = checklists.itemsForTemplate(template.id).filter((i) => i.spawn_category);
+    }
   }
   const agent = res.locals.currentAgent;
   res.render("dashboard/new-ticket", {
@@ -454,6 +463,7 @@ router.get("/tickets/new", (req, res) => {
     subcategorySuggestions: subcategorySuggestions(),
     errors: [],
     values,
+    spawnPreview,
     uploadHint: LIMITS_HINT,
   });
 });
@@ -470,6 +480,7 @@ router.post("/tickets/new", handleUpload("attachments"), verifyCsrf, (req, res) 
     priority = "Medium",
     asset_id = "",
     assigned_to = "",
+    template_id = "",
   } = req.body;
 
   const values = { requester_name, requester_email, category, subcategory, subject, description, priority, asset_id, assigned_to };
@@ -487,6 +498,7 @@ router.post("/tickets/new", handleUpload("attachments"), verifyCsrf, (req, res) 
       subcategorySuggestions: subcategorySuggestions(),
       errors,
       values,
+      spawnPreview: [],
       uploadHint: LIMITS_HINT,
     });
   };
@@ -546,6 +558,32 @@ router.post("/tickets/new", handleUpload("attachments"), verifyCsrf, (req, res) 
   }
   if (req.files && req.files.length) {
     saveAttachments({ ticketId: result.lastInsertRowid, files: req.files, uploadedBy: "agent", agentId: req.session.agentId });
+  }
+
+  // Onboarding-checklist spawns (see src/checklists.js) - only when this
+  // ticket was actually created FROM that exact template, for that
+  // template's own category (not just any request that happens to carry a
+  // template_id field): template_id round-trips through the new-ticket
+  // form as a hidden input set only by the ?template= prefill, and
+  // category was already validated above against categoryNamesForAgent(),
+  // so tying the spawn to "template.category === the category just used"
+  // means this can't be used to wire up spawns the agent didn't actually
+  // ask for by picking that template.
+  const templateId = template_id ? parseInt(template_id, 10) : null;
+  if (templateId) {
+    const template = db.prepare("SELECT * FROM ticket_templates WHERE id = ?").get(templateId);
+    if (template && template.category === category) {
+      checklists.applyTemplateSpawns({
+        templateId,
+        originTicket: {
+          id: result.lastInsertRowid,
+          subject: subject.trim(),
+          requester_name: requester_name.trim(),
+          requester_email: requester_email.trim().toLowerCase(),
+        },
+        agentId: req.session.agentId,
+      });
+    }
   }
 
   sendTicketCreatedEmail({
@@ -1066,6 +1104,39 @@ router.post("/tickets/:id/confidential", verifyCsrf, (req, res) => {
   res.redirect(`/dashboard/tickets/${ticket.id}`);
 });
 
+// Optional reminder/expiry date, generic on any ticket (not restricted to
+// any one department at the DB level - see src/db/index.js's twentieth
+// migration) but most relevant to Legal's Contract Review / Compliance /
+// NDA / Litigation categories. See src/contractReminders.js for the
+// periodic check that emails the ticket's department once this date starts
+// approaching. Mirrors src/assets.js's warranty_expires update exactly: a
+// changed date clears reminder_alerted_at so it can alert again later.
+router.post("/tickets/:id/reminder", verifyCsrf, (req, res) => {
+  const ticket = getTicketOr404(req, res, req.params.id);
+  if (!ticket) return;
+
+  const raw = (req.body.reminder_date || "").trim().slice(0, 10);
+  if (raw && !/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return res.status(400).render("error", { title: "Invalid date", message: "Enter a valid reminder date." });
+  }
+  const reminderDate = raw || null;
+  const changed = (ticket.reminder_date || null) !== reminderDate;
+
+  db.prepare(
+    `UPDATE tickets SET reminder_date = ?, updated_at = datetime('now')${changed ? ", reminder_alerted_at = NULL" : ""} WHERE id = ?`
+  ).run(reminderDate, ticket.id);
+
+  if (changed) {
+    db.prepare(`INSERT INTO ticket_activity (ticket_id, agent_id, type, body) VALUES (?, ?, 'note', ?)`).run(
+      ticket.id,
+      req.session.agentId,
+      reminderDate ? `Reminder date set to ${reminderDate}.` : "Reminder date cleared."
+    );
+  }
+
+  res.redirect(`/dashboard/tickets/${ticket.id}`);
+});
+
 // Shared by the single-ticket assign route and the bulk-assign route below.
 // Enforces department-of-assignee eligibility (departments.isEligibleAssignee)
 // server-side regardless of what the submitted select actually offered -
@@ -1261,11 +1332,22 @@ router.get("/tickets/:id/attachments/:attachmentId/download", (req, res) => {
   res.download(path.join(ATTACHMENTS_DIR, attachment.stored_name), attachment.original_name);
 });
 
+// Every template alongside its own checklist items (see src/checklists.js)
+// - a plain checklist line, or one that spawns its own ticket in another
+// (or the same) department's category the moment this template is used.
+function templatesWithChecklists() {
+  return db
+    .prepare("SELECT * FROM ticket_templates ORDER BY name")
+    .all()
+    .map((t) => ({ ...t, checklistItems: checklists.itemsForTemplate(t.id) }));
+}
+
 router.get("/templates", (req, res) => {
   res.render("dashboard/templates", {
     title: "Ticket templates",
-    templates: db.prepare("SELECT * FROM ticket_templates ORDER BY name").all(),
+    templates: templatesWithChecklists(),
     categories: departments.categoryNames(),
+    categoriesByDepartment: departments.categoriesByDepartment(),
     error: null,
   });
 });
@@ -1275,8 +1357,9 @@ router.post("/templates", verifyCsrf, (req, res) => {
   if (!name.trim() || !departments.isValidCategoryName(category) || !subject.trim() || !description.trim()) {
     return res.status(400).render("dashboard/templates", {
       title: "Ticket templates",
-      templates: db.prepare("SELECT * FROM ticket_templates ORDER BY name").all(),
+      templates: templatesWithChecklists(),
       categories: departments.categoryNames(),
+      categoriesByDepartment: departments.categoriesByDepartment(),
       error: "Name, category, subject, and description are all required.",
     });
   }
@@ -1291,6 +1374,36 @@ router.post("/templates", verifyCsrf, (req, res) => {
 
 router.post("/templates/:id/delete", verifyCsrf, (req, res) => {
   db.prepare("DELETE FROM ticket_templates WHERE id = ?").run(req.params.id);
+  res.redirect("/dashboard/templates");
+});
+
+// A checklist line on a template - see src/checklists.js. spawn_category is
+// optional and deliberately not restricted to a different department than
+// the template's own category: an HR template is free to spawn an IT and a
+// Marketing ticket (the onboarding use case this is for), but nothing here
+// requires it to leave HR either.
+router.post("/templates/:id/checklist-items", verifyCsrf, (req, res) => {
+  const template = db.prepare("SELECT * FROM ticket_templates WHERE id = ?").get(req.params.id);
+  if (!template) return res.status(404).render("error", { title: "Not found", message: "That template does not exist." });
+
+  const result = checklists.addChecklistItem(template.id, {
+    label: req.body.label,
+    spawnCategory: req.body.spawn_category,
+  });
+  if (result.error) {
+    return res.status(400).render("dashboard/templates", {
+      title: "Ticket templates",
+      templates: templatesWithChecklists(),
+      categories: departments.categoryNames(),
+      categoriesByDepartment: departments.categoriesByDepartment(),
+      error: result.error,
+    });
+  }
+  res.redirect("/dashboard/templates");
+});
+
+router.post("/templates/:id/checklist-items/:itemId/delete", verifyCsrf, (req, res) => {
+  checklists.removeChecklistItem(req.params.itemId);
   res.redirect("/dashboard/templates");
 });
 

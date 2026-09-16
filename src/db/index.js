@@ -446,6 +446,28 @@ db.exec(`
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_categories_department_id ON categories(department_id);
+
+  -- Checklist lines attached to a ticket template (see ticket_templates
+  -- above and src/checklists.js) - the "New Hire Onboarding" HR template's
+  -- own build-out. A plain line (spawn_category NULL) is just a checklist
+  -- entry with nothing else to do; a line with a spawn_category creates its
+  -- own brand-new, completely ordinary ticket in that category the moment
+  -- the template is used - own department, own visibility, own assignment,
+  -- exactly like any other ticket filed straight into that category (NOT a
+  -- shared-visibility record). spawn_category is deliberately not
+  -- constrained to a different department than the template's own category
+  -- - self-spawning into the same department is harmless, just unusual.
+  -- "{name}" in label is replaced with the originating ticket's own
+  -- requester_name when the template is used.
+  CREATE TABLE IF NOT EXISTS template_checklist_items (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id    INTEGER NOT NULL REFERENCES ticket_templates(id) ON DELETE CASCADE,
+    label          TEXT NOT NULL,
+    spawn_category TEXT,
+    position       INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_checklist_items_template_id ON template_checklist_items(template_id);
 `);
 
 // sla_thresholds starts empty on a fresh database (CREATE TABLE doesn't seed
@@ -765,6 +787,23 @@ if (!automationColumns.some((c) => c.name === "department_id")) {
 const webhookColumns = db.prepare("PRAGMA table_info(webhooks)").all();
 if (!webhookColumns.some((c) => c.name === "department_id")) {
   db.exec("ALTER TABLE webhooks ADD COLUMN department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL");
+}
+
+// Twentieth migration: guarded ALTER TABLE for tickets.reminder_date and
+// tickets.reminder_alerted_at - see src/contractReminders.js. A generic,
+// optional reminder/expiry date usable on any ticket (most relevant to
+// Legal's Contract Review / Compliance / NDA / Litigation categories, but
+// not restricted to them at this level, same as e.g. subcategory above).
+// reminder_alerted_at is the same idempotent-alert flag as
+// assets.warranty_alerted_at - set once an alert digest goes out, cleared
+// the moment reminder_date itself changes so it can alert again later.
+const ticketColumns11 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns11.some((c) => c.name === "reminder_date")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN reminder_date TEXT");
+}
+const ticketColumns12 = db.prepare("PRAGMA table_info(tickets)").all();
+if (!ticketColumns12.some((c) => c.name === "reminder_alerted_at")) {
+  db.exec("ALTER TABLE tickets ADD COLUMN reminder_alerted_at TEXT");
 }
 
 module.exports = db;
